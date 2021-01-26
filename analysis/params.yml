@@ -1,0 +1,168 @@
+
+general:
+  screenRes: [1680,1050]
+  screenRes_HD: [1920,1080]
+  screen_distance: 225
+  screen_width: 69
+
+  TR: 1.6
+
+  paths:
+    data: 
+      local:
+        sourcedata: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/sourcedata'
+        derivatives: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/derivatives'
+      
+      #aeneas:
+      
+      #cartesius:
+      
+      #lisa:
+
+    analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
+
+processing:
+  sg_filt_window_length: 81
+  sg_filt_polyorder: 3
+  sg_filt_deriv: 0
+
+  smooth_fwhm: 2
+
+  crop_pRF_TR: 7
+
+  with_smooth: False
+  with_psc: True
+
+  total_chunks: 83
+
+  nuisance_columns: ['csf',
+                    'white_matter',
+                    'global_signal',
+                    'std_dvars',
+                    'dvars',
+                    'framewise_displacement',
+                    't_comp_cor_00',
+                    't_comp_cor_01',
+                    't_comp_cor_02',
+                    't_comp_cor_03',
+                    't_comp_cor_04',
+                    't_comp_cor_05',
+                    'a_comp_cor_00',
+                    'a_comp_cor_01',
+                    'a_comp_cor_02',
+                    'a_comp_cor_03',
+                    'a_comp_cor_04',
+                    'a_comp_cor_05',
+                    'trans_x',
+                    'trans_y',
+                    'trans_z',
+                    'rot_x',
+                    'rot_x',
+                    'rot_z']
+
+fitting:
+  prf:
+    fit_model: 'css'
+
+    min_eccen: 0.25
+    max_eccen: 15
+
+    min_size: 0.25
+    max_size: 10
+
+    min_n: 0.05
+    max_n: 1.1
+
+    grid_steps: 20
+
+    rsq_threshold: 0.14
+
+    N_PROCS: 4
+
+  soma:
+    z_threshold: 3.1
+
+    all_contrasts:
+      face: ['eyebrows',
+            'eyes',
+            'mouth',
+            'tongue']
+
+      upper_limb: ['lhand_fing1',
+                  'lhand_fing2',
+                  'lhand_fing3',
+                  'lhand_fing4',
+                  'lhand_fing5',
+                  'rhand_fing1',
+                  'rhand_fing2',
+                  'rhand_fing3',
+                  'rhand_fing4',
+                  'rhand_fing5']
+
+      lower_limb: ['lleg',
+                  'rleg']
+
+    soma_stimulus: ['eyebrows.avi',
+                    'eyes.avi',
+                    'mouth.avi',
+                    'tongue.avi',
+                    'lhand_fing1.avi',
+                    'lhand_fing2.avi',
+                    'lhand_fing3.avi',
+                    'lhand_fing4.avi',
+                    'lhand_fing5.avi',
+                    'lleg.avi',
+                    'eyebrows.avi',
+                    'eyes.avi',
+                    'mouth.avi',
+                    'tongue.avi',
+                    'bhand_fing1.avi',
+                    'bhand_fing2.avi',
+                    'bhand_fing3.avi',
+                    'bhand_fing4.avi',
+                    'bhand_fing5.avi',
+                    'bleg.avi',
+                    'tongue.avi',
+                    'mouth.avi',
+                    'eyes.avi',
+                    'eyebrows.avi',
+                    'rhand_fing1.avi',
+                    'rhand_fing2.avi',
+                    'rhand_fing3.avi',
+                    'rhand_fing4.avi',
+                    'rhand_fing5.avi',
+                    'rleg.avi',
+                    'eyebrows.avi',
+                    'eyes.avi',
+                    'mouth.avi',
+                    'tongue.avi',
+                    'lhand_fing5.avi',
+                    'lhand_fing4.avi',
+                    'lhand_fing3.avi',
+                    'lhand_fing2.avi',
+                    'lhand_fing1.avi',
+                    'lleg.avi',
+                    'eyebrows.avi',
+                    'eyes.avi',
+                    'mouth.avi',
+                    'tongue.avi",
+                    'bhand_fing5.avi',
+                    'bhand_fing4.avi',
+                    'bhand_fing3.avi',
+                    'bhand_fing2.avi',
+                    'bhand_fing1.avi',
+                    'bleg.avi',
+                    'tongue.avi',
+                    'mouth.avi',
+                    'eyes.avi',
+                    'eyebrows.avi',
+                    'rhand_fing5.avi',
+                    'rhand_fing4.avi',
+                    'rhand_fing3.avi',
+                    'rhand_fing2.avi',
+                    'rhand_fing1.avi',
+                    'rleg.avi']
+
+
+
+
