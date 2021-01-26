@@ -1,0 +1,63 @@
+global:
+  screen:
+    size: [1680, 1050]
+    full_screen: True
+    background_color: [0.25,0.25,0.25]
+    foreground_color: [1,1,1]
+    gamma_scale: [2.475,2.25,2.15]
+    physical_screen_size: [69, 39]
+    physical_screen_distance: 225
+    max_lums: [24.52, 78.8, 10.19]
+    min_lums: [0, 0, 0]
+    wait_blanking: True
+    mouse_visible: False
+    linearize_gamma: True
+    screen_nr: 0
+    framerate: 60
+
+  stimuli:
+    mask_type: 1
+
+    vertical_stim_size: 1
+    horizontal_stim_size: 1
+
+    bar_width_ratio: 0.125
+
+    num_elements: 2000
+    fast_speed: 12.0       
+    slow_speed: 3.0        
+    element_size: 45.0        
+    element_spatial_frequency: 2      
+    color_ratio: 0.5
+    element_lifetime: 0.05
+
+    stim_present_booleans: [0,1,1,0,1,1,0]  
+    stim_direction_indices: [0,0,2,0,6,4,0]
+
+    # stim_present_booleans: [1,1,1,1]  
+    # stim_direction_indices: [0,2,6,4]
+
+    fixation_outer_rim_size: 0.4
+    fixation_rim_size: 0.25
+    fixation_size: 0.15
+
+  buttons:
+    keys: ['b', 'y', 'e']
+
+  timing:
+    PRF_ITI_in_TR: 0.5
+    TR: 1.6
+    vertical_bar_pass_in_TR: 10
+    horizontal_bar_pass_in_TR: 18
+    empty_bar_pass_in_TR: 10
+    task_rate: 0.5
+    task_rate_offset: 1
+
+  mri:
+    mri_trigger_key: 't'
+
+  eyetracker:
+    sample_rate: 1000
+    n_calib_points: 9
+    calib_size: 0.5
+    x_offset: 0
