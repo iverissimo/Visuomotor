@@ -67,14 +67,11 @@ for t,cond in enumerate(params['general']['tasks']):
                     file = crop_gii(file,params['processing']['crop_pRF_TR'],out_pth,extension = params['processing']['extension'])
                 
                 # high pass filter all runs (savgoy-golay)
-                filt_gii,filt_gii_pth = highpass_gii(file,params['processing']['sg_filt_polyorder'],params['processing']['sg_filt_deriv'],
+                _ ,filt_gii_pth = highpass_gii(file,params['processing']['sg_filt_polyorder'],params['processing']['sg_filt_deriv'],
                                                          params['processing']['sg_filt_window_length'],out_pth, extension = params['processing']['extension'])
 
                 
                 # do PSC
-                psc_data, psc_data_pth = psc_gii(filt_gii_pth, out_pth, method = 'median', extension = params['processing']['extension']) 
-
-                # smooth it
-                smt_file, smt_pth = smooth_gii(psc_data_pth, out_pth, fwhm = params['processing']['smooth_fwhm'], extension = params['processing']['extension'])
+                _ , psc_data_pth = psc_gii(filt_gii_pth, out_pth, method = 'median', extension = params['processing']['extension']) 
 
 
