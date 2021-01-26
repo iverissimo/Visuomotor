@@ -7,21 +7,22 @@ general:
 
   TR: 1.6
 
+  subs: [1,2,3,4,5,7,8,9,11,12,13]
+
+  tasks: ['prf','soma']
+
   paths:
     data: 
-      local:
-        sourcedata: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/sourcedata'
-        derivatives: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/derivatives'
-      
-      #aeneas:
-      
-      #cartesius:
-      
-      #lisa:
+      sourcedata: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/sourcedata'
+      derivatives: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/derivatives'
 
     analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
 
 processing:
+
+  space: 'fsaverage' #'T1w'
+  extension: '.func.gii'
+
   sg_filt_window_length: 81
   sg_filt_polyorder: 3
   sg_filt_deriv: 0
@@ -34,6 +35,8 @@ processing:
   with_psc: True
 
   total_chunks: 83
+
+  regress_conf: False
 
   nuisance_columns: ['csf',
                     'white_matter',
@@ -145,7 +148,7 @@ fitting:
                     'eyebrows.avi',
                     'eyes.avi',
                     'mouth.avi',
-                    'tongue.avi",
+                    'tongue.avi',
                     'bhand_fing5.avi',
                     'bhand_fing4.avi',
                     'bhand_fing3.avi',
