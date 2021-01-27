@@ -10,11 +10,12 @@ import re
 import numpy as np
 import pandas as pd
 
+sys.path.append(os.path.split(os.getcwd())[0]) # so script it finds util.py
 from utils import * #import script to use relevante functions
 
 
 # load settings from yaml
-with open(os.path.join(os.path.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
+with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.yml'), 'r') as f_in:
             params = yaml.safe_load(f_in)
 
 

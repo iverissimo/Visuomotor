@@ -10,7 +10,9 @@ import re
 
 import matplotlib.colors as colors
 
-from utils import *
+sys.path.append(os.path.split(os.getcwd())[0]) # so script it finds util.py
+from utils import * #import script to use relevante functions
+
 
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as matcm
@@ -40,8 +42,8 @@ else:
     task = str(sys.argv[2])
 
     # load settings from yaml
-    with open(os.path.join(os.path.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
-        params = yaml.safe_load(f_in)	
+    with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.yml'), 'r') as f_in:
+        params = yaml.safe_load(f_in)
                 
     run_type = str(sys.argv[3])
 
