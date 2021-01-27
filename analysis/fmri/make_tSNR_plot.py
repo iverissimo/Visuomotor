@@ -131,7 +131,7 @@ for files in ['pre','post']:
             tsnr_flat = cortex.dataset.Vertex(stat_map.T, params['processing']['space'],
                                  vmin=low_lim, vmax=up_lim, cmap=colormap)
             
-            _ = cortex.quickflat.make_png(os.path.join(out_dir,('flatmap_'+new_filename).replace(params['processing']['extension'],'.png')),
+            _ = cortex.quickflat.make_png(os.path.join(out_dir,('flatmap_'+new_filename.replace(params['processing']['extension'],'.png'))),
                                           tsnr_flat, recache=True,with_colorbar=True,with_curvature=True,with_sulci=True)
 
     
