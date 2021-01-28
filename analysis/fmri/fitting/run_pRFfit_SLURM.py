@@ -19,9 +19,9 @@ if len(sys.argv)<2:
     
 else:
     if sys.argv[1] == 'all': # process all subjects  
-        subjects = ['sub-'+str(x).zfill(2) for x in params['general']['subs']]
+        subjects = [str(x) for x in params['general']['subs']]
     else:     
-        subjects = ['sub-'+str(sys.argv[1]).zfill(2)] #fill subject number with 0 in case user forgets
+        subjects = [str(sys.argv[1])] # make it string
 
 # number of chunks to split data in (makes fitting faster)
 total_chunks = params['fitting']['prf']['total_chunks']
@@ -62,7 +62,7 @@ for sub in subjects:
         working_string = working_string.replace('$CHUNK_NR', str(chu+1).zfill(3))
         working_string = working_string.replace('$PY_CODE', pycode_dir)
 
-        js_name = os.path.join(batch_dir, 'pRF_' + sub + '_chunk-%s_of_%s'%(str(chu+1).zfill(3),str(total_chunks).zfill(3)) + '_iterative.sh')
+        js_name = os.path.join(batch_dir, 'pRF_sub-' + str(sub).zfill(2) + '_chunk-%s_of_%s'%(str(chu+1).zfill(3),str(total_chunks).zfill(3)) + '_iterative.sh')
         of = open(js_name, 'w')
         of.write(working_string)
         of.close()
