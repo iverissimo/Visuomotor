@@ -19,7 +19,7 @@ general:
     analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
 
     fitting:
-      where: 'local' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
+      where: 'cartesius' #'local' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
       
       cartesius:
         basedir: '/home/inesv/'
