@@ -43,7 +43,7 @@ elif len(sys.argv) < 3:
 else:
     # fill subject number and chunk number with 0 in case user forgets
     sj = str(sys.argv[1]).zfill(2)
-    chunk_num = str(sys.argv[3]).zfill(3)
+    chunk_num = str(sys.argv[2]).zfill(3)
 
 
 # number of chunks that data was split in
