@@ -18,6 +18,12 @@ general:
 
     analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
 
+    fitting:
+      cartesius:
+        basedir: '/home/inesv/'
+        
+
+
 processing:
 
   space: 'fsaverage' #'T1w'
@@ -33,8 +39,6 @@ processing:
 
   with_smooth: False
   with_psc: True
-
-  total_chunks: 83
 
   regress_conf: False
 
@@ -81,6 +85,8 @@ fitting:
     rsq_threshold: 0.14
 
     N_PROCS: 4
+
+    total_chunks: 83
 
   soma:
     z_threshold: 3.1
