@@ -19,7 +19,7 @@ with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.y
             params = yaml.safe_load(f_in)
 
 
-# define participant number and open json parameter file
+# define participant number 
 if len(sys.argv)<2:
     raise NameError('Please add subject number (ex:01) or "all" '
                     'as 1st argument in the command line!')
