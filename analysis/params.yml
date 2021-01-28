@@ -19,9 +19,15 @@ general:
     analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
 
     fitting:
+      where: 'local' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
+      
       cartesius:
         basedir: '/home/inesv/'
-        
+        derivatives: '/home/inesv/Visuomotor/Data/derivatives'
+
+      local:
+        basedir: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor'
+        derivatives: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/derivatives'
 
 
 processing:
@@ -36,9 +42,6 @@ processing:
   smooth_fwhm: 2
 
   crop_pRF_TR: 7
-
-  with_smooth: False
-  with_psc: True
 
   regress_conf: False
 
@@ -77,7 +80,7 @@ fitting:
     min_size: 0.25
     max_size: 10
 
-    min_n: 0.05
+    min_n: 0.01
     max_n: 1.1
 
     grid_steps: 20
@@ -85,8 +88,10 @@ fitting:
     rsq_threshold: 0.14
 
     N_PROCS: 4
-
     total_chunks: 83
+
+    fit_smooth: False
+    extension: 'cropped_sg_psc.func.gii'
 
   soma:
     z_threshold: 3.1
