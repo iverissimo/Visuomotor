@@ -62,7 +62,7 @@ median_pth = os.path.join(postfmriprep_pth,'median') # path to median run files
 fits_pth = os.path.join(deriv_pth,'pRF_fit','sub-{sj}'.format(sj=sj)) # path to pRF fits
 # should add here an "if doesn't exist, fit single voxel", at a later stage.
 
-figures_pth = os.path.join(deriv_pth,'plots','pRFfit','single_vertex','sub-{sj}'.format(sj=sj)) # path to save plots
+figures_pth = os.path.join(deriv_pth,'plots','single_vertex','pRFfit','sub-{sj}'.format(sj=sj)) # path to save plots
 if not os.path.exists(figures_pth):
     os.makedirs(figures_pth) 
 
