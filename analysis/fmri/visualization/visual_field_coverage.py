@@ -63,7 +63,7 @@ rsq_threshold = params['plotting']['prf']['rsq_threshold']
 # change this to simplify appending all subs and making median plot
 if sj == 'all':
     all_sj = params['general']['subs']
-    sj = [str(x).zfill(2) for _,x in enumerate(all_sj)] #if x not in params['general']['exclude_subs']]
+    sj = [str(x).zfill(2) for _,x in enumerate(all_sj) if x not in params['general']['exclude_subs']]
 else:
     sj = [sj]
 
@@ -119,7 +119,6 @@ for idx,roi in enumerate(ROIs):
         
         left_xx_4plot.append(left_xx[left_rsq>=rsq_threshold]) 
         left_yy_4plot.append(left_yy[left_rsq>=rsq_threshold]) 
-        left_pa_4plot.append(left_pa[left_rsq>=rsq_threshold]) 
 
         # RIGHT HEMI
         right_xx = masked_est['x'][right_roi_verts]
@@ -128,7 +127,6 @@ for idx,roi in enumerate(ROIs):
         
         right_xx_4plot.append(right_xx[right_rsq>=rsq_threshold]) 
         right_yy_4plot.append(right_yy[right_rsq>=rsq_threshold]) 
-        right_pa_4plot.append(right_pa[right_rsq>=rsq_threshold]) 
 
     # set screen limits for plotting
     res = params['general']['screenRes']

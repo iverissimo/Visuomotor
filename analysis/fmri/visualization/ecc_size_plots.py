@@ -57,7 +57,7 @@ if not os.path.exists(figures_pth):
 # change this to simplify appending all subs and making median plot
 if sj == 'all':
     all_sj = params['general']['subs']
-    sj = [str(x).zfill(2) for _,x in enumerate(all_sj)] #if x not in params['general']['exclude_subs']]
+    sj = [str(x).zfill(2) for _,x in enumerate(all_sj) if x not in params['general']['exclude_subs']]
 else:
     sj = [sj]
 
