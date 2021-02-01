@@ -191,8 +191,8 @@ plt.yticks(fontsize = 18)
 ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
-ax.set_xlabel('pRF eccentricity [dva]', fontsize = 18, labelpad = 15)
-ax.set_ylabel('pRF size [dva]', fontsize = 18, labelpad = 15)
+ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
+ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 #ax.set_title('ecc vs size plot, %d bins from %.2f-%.2f ecc [dva]'%(n_bins,min_ecc,max_ecc),fontsize=12)
 sns.despine(offset=15)
 fig1 = plt.gcf()
@@ -216,8 +216,8 @@ ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
 if sj != 'all':
-    ax.set_xlabel('pRF eccentricity [dva]', fontsize = 18, labelpad = 15)
-    ax.set_ylabel('pRF size [dva]', fontsize = 18, labelpad = 15)
+    ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
+    ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 
 #ax.set_title('ecc vs size plot, %d bins from %.2f-%.2f ecc [dva]'%(n_bins,min_ecc,max_ecc),fontsize=12)
 sns.despine(offset=15)
@@ -242,8 +242,8 @@ ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
 if sj != 'all':
-    ax.set_xlabel('pRF eccentricity [dva]', fontsize = 18, labelpad = 15)
-    ax.set_ylabel('pRF size [dva]', fontsize = 18, labelpad = 15)
+    ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
+    ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 
 #ax.set_title('ecc vs size plot, %d bins from %.2f-%.2f ecc [dva]'%(n_bins,min_ecc,max_ecc),fontsize=12)
 sns.despine(offset=15)
