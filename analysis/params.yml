@@ -9,6 +9,8 @@ general:
 
   subs: [1,2,3,4,5,7,8,9,11,12,13]
 
+  exclude_subs: [3,5,7,13]
+
   tasks: ['prf','soma']
 
   paths:
@@ -74,6 +76,25 @@ processing:
                     'rot_x',
                     'rot_z']
 
+plotting:
+
+  prf:
+    rsq_threshold: 0.17
+
+    n_bins: 10
+    min_ecc: 0.25
+    max_ecc: 3.3
+
+    ROIs: ['V1','V2','V3','V3AB','hV4','LO','IPS0','IPS1','IPS2+','sPCS','iPCS']
+
+    occipital: ['V1','V2','V3','V3AB','hV4','LO']
+    parietal: ['IPS0','IPS1','IPS2+']
+    frontal: ['sPCS','iPCS']
+
+  soma:
+    z_threshold: 2.7
+
+
 fitting:
   prf:
     fit_model: 'css'
@@ -89,8 +110,6 @@ fitting:
 
     grid_steps: 20
 
-    rsq_threshold: 0.14
-
     N_PROCS: 4
     total_chunks: 83
 
@@ -98,7 +117,6 @@ fitting:
     extension: 'cropped_sg_psc.func.gii'
 
   soma:
-    z_threshold: 3.1
 
     all_contrasts:
       face: ['eyebrows',

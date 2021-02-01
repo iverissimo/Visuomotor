@@ -482,7 +482,7 @@ def shift_DM(prf_dm):
     return avg_prf_dm #(x,y,t)
 
 
-def join_chunks(path, out_name, hemifield, chunk_num = 83, fit_model = 'css'):
+def join_chunks(path, out_name, hemi, chunk_num = 83, fit_model = 'css'):
     """ combine all chunks into one single estimate numpy array (per hemisphere)
 
     Parameters
@@ -491,8 +491,8 @@ def join_chunks(path, out_name, hemifield, chunk_num = 83, fit_model = 'css'):
         path to files
     out_name: str
         output name of combined estimates
-    hemifield : str
-        'left' or 'right' hemisphere
+    hemi : str
+        'hemi_L' or 'hemi_R' hemisphere
     chunk_num : int
         total number of chunks to combine (per hemi)
     fit_model: str
@@ -504,8 +504,7 @@ def join_chunks(path, out_name, hemifield, chunk_num = 83, fit_model = 'css'):
         numpy array of estimates
     
     """
-        
-    hemi = 'hemi-L' if hemifield == 'left' else 'hemi-R'
+    print(hemi)
     
     for ch in range(chunk_num):
         
@@ -668,7 +667,7 @@ def mask_estimates(estimates, sub, params, ROI = 'V1', fit_model = 'css'):
                         masked_beta[i] = beta[i]
                         masked_baseline[i] = baseline[i]
                         masked_rsq[i] = rsq[i]
-                        masked_ns[i] = ns[i]
+                        masked_ns[i]=ns[i]
 
     if ROI != 'None':
         

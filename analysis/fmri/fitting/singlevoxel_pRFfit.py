@@ -57,6 +57,10 @@ else:
     
         vertex = int(sys.argv[3]) # vertex number
 
+# set font type for plots globally
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = 'Helvetica'
+
 
 # number of chunks that data was split in
 total_chunks = params['fitting']['prf']['total_chunks']
@@ -176,18 +180,14 @@ for _,model in enumerate(models): # run through each model
     
     estimates = []
     
-    for _,h in enumerate(hemi): # each hemi field
+    for _,field in enumerate(hemi): # each hemi field
         
         # name for 
-        gii_file = [x for _,x in enumerate(med_filenames) if h in x][0]
-        estimates_combi = os.path.split(gii_file)[-1].replace(params['processing']['extension'],'_'+model+'.estimates.npz')
+        gii_file = [x for _,x in enumerate(med_filenames) if field in x][0]
+        estimates_combi = os.path.split(gii_file)[-1].replace(params['processing']['extension'],'_'+model+'_estimates.npz')
     
-        if 'gauss' in model:
-            estimates_pth = os.path.join(fits_pth,'gauss')
-
-        else: # if css
-            estimates_pth = os.path.join(fits_pth,'css')
-            
+        estimates_pth = os.path.join(fits_pth,model)
+ 
         if os.path.isfile(os.path.join(estimates_pth,estimates_combi)): # if combined estimates exists
             
             print('loading %s'%os.path.join(estimates_pth,estimates_combi))
@@ -195,7 +195,7 @@ for _,model in enumerate(models): # run through each model
 
         else: # if not join chunks and save file
             
-            estimates.append(join_chunks(estimates_pth,estimates_combi,h,
+            estimates.append(join_chunks(estimates_pth,estimates_combi,field,
                                          chunk_num = total_chunks,fit_model = model))
             
     # mask estimates
@@ -248,7 +248,7 @@ for _,model in enumerate(models): # run through each model
 
     plt.legend(loc=0)
 
-    filename = estimates_combi.replace('.estimates.npz','_ROI-%s_vertex-%s.svg'%(roi,vertex))
+    filename = estimates_combi.replace('_estimates.npz','_ROI-%s_vertex-%s.svg'%(roi,vertex))
     fig.savefig(os.path.join(figures_pth,filename), dpi=100,bbox_inches = 'tight')
 
 
