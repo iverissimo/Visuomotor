@@ -88,11 +88,9 @@ for idx,roi in enumerate(ROIs):
 
     left_xx_4plot = []
     left_yy_4plot = []
-    left_pa_4plot = []
 
     right_xx_4plot = []
     right_yy_4plot = []
-    right_pa_4plot = []
 
     for i,s in enumerate(sj): # for each subject (if all)
 
@@ -118,9 +116,6 @@ for idx,roi in enumerate(ROIs):
         left_xx = masked_est['x'][left_roi_verts]
         left_yy = masked_est['y'][left_roi_verts]
         left_rsq = masked_est['rsq'][left_roi_verts]
-
-        complex_location = masked_est['x'][left_roi_verts] + masked_est['y'][left_roi_verts] * 1j # calculate eccentricity values
-        left_pa = np.angle(complex_location)
         
         left_xx_4plot.append(left_xx[left_rsq>=rsq_threshold]) 
         left_yy_4plot.append(left_yy[left_rsq>=rsq_threshold]) 
@@ -130,9 +125,6 @@ for idx,roi in enumerate(ROIs):
         right_xx = masked_est['x'][right_roi_verts]
         right_yy = masked_est['y'][right_roi_verts]
         right_rsq = masked_est['rsq'][right_roi_verts] 
-
-        complex_location = masked_est['x'][right_roi_verts] + masked_est['y'][right_roi_verts] * 1j # calculate eccentricity values
-        right_pa = np.angle(complex_location)
         
         right_xx_4plot.append(right_xx[right_rsq>=rsq_threshold]) 
         right_yy_4plot.append(right_yy[right_rsq>=rsq_threshold]) 
@@ -184,16 +176,4 @@ for idx,roi in enumerate(ROIs):
     fig_hex = plt.gcf()
     fig_hex.savefig(os.path.join(figures_pth,'VF_coverage_ROI-%s_hemi-both.svg'%roi),dpi=100)
 
-
-    # Visualise with polar histogram
-    left_ind4plot = np.where((np.logical_not(np.isnan(left_pa))))
-    right_ind4plot = np.where((np.logical_not(np.isnan(right_pa))))
-
-    fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection='polar'),figsize=(8, 8))
-    rose_plot(ax, left_pa[left_ind4plot],color='g', lab_unit="radians")
-    rose_plot(ax, right_pa[right_ind4plot],color='r', lab_unit="radians")
-    plt.title('Histogram of polar angle distribution for %s'%roi, pad=20)
-
-    fig.tight_layout()
-    plt.savefig(os.path.join(figures_pth,'PA_histogram_circular_ROI-%s_hemi-both.svg'%roi),dpi=100)
 
