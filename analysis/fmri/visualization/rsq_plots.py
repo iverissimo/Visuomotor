@@ -27,7 +27,7 @@ with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.y
 
 # define participant number, ROI (if the case) and vertex number and open json parameter file
 if len(sys.argv)<2: 
-    raise NameError('Please add subject number (ex: 01)  or "all" '	
+    raise NameError('Please add subject number (ex: 01)  or "median" '	
                     'as 1st argument in the command line!')	
 
 else:
@@ -62,7 +62,7 @@ if not os.path.exists(figures_pth):
 rsq_threshold = params['plotting']['prf']['rsq_threshold']
 
 # change this to simplify appending all subs and making median plot
-if sj == 'all':
+if sj == 'median':
     all_sj = params['general']['subs']
     sj = [str(x).zfill(2) for _,x in enumerate(all_sj) if x not in params['general']['exclude_subs']]
 else:
@@ -171,7 +171,7 @@ for _,tsk in enumerate(['prf']):#tasks):
     post_proc_gii.sort()
     
     smooth_file = os.path.split(post_proc_gii[0])[-1].replace('hemi-L','hemi-both').replace('.func.gii','_rsq_smooth%d.npy'%params['processing']['smooth_fwhm'])
-    smooth_file = os.path.join(out_estimates_dir,smooth_file)
+    smooth_file = os.path.join(out_estimates_dir,smooth_file.replace('sub-{sj}'.format(sj = sj[0]),'sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2))))
     
     if os.path.isfile(smooth_file): # if smooth file exists
         print('loading %s'%smooth_file)
@@ -186,7 +186,8 @@ for _,tsk in enumerate(['prf']):#tasks):
                                                '_rsq', 
                                                sub_space = params['processing']['space'], 
                                                n_TR = params['plotting'][tsk]['n_TR'], 
-                                               smooth_fwhm = params['processing']['smooth_fwhm'])
+                                               smooth_fwhm = params['processing']['smooth_fwhm'],
+                                               sub_ID = str(sys.argv[1]).zfill(2))
 
     
 

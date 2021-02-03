@@ -779,7 +779,7 @@ def smooth_gii(gii_file, outdir, space = 'fsaverage', fwhm = 2):
     return smooth_gii_pth
 
 
-def smooth_nparray(arr_in, header_filename, out_dir, filestr, sub_space = 'fsaverage', n_TR = 83, smooth_fwhm = 2):
+def smooth_nparray(arr_in, header_filename, out_dir, filestr, sub_space = 'fsaverage', n_TR = 83, smooth_fwhm = 2, sub_ID = 'median'):
 
     """ takes array with shape (vertices,), with some relevant quantification
     and smooths it - useful for later plotting of surface map
@@ -800,6 +800,8 @@ def smooth_nparray(arr_in, header_filename, out_dir, filestr, sub_space = 'fsave
         number of TRs of task
     smooth_fwhm : int/float
         width of the kernel, at half of the maximum of the height of the Gaussian
+    sub_ID: str
+        subject identifier (ex: '01' or 'median')
 
     Outputs
     -------
@@ -861,6 +863,8 @@ def smooth_nparray(arr_in, header_filename, out_dir, filestr, sub_space = 'fsave
     out_array = np.concatenate((smooth_arr[0][0],smooth_arr[1][0]))  
 
     new_filename = os.path.split(smo_estimates_path)[-1].replace('.func.gii','.npy').replace('hemi-R','hemi-both')
+    new_filename = re.sub('sub-\d{2}_', 'sub-%s_'%sub_ID.zfill(2), new_filename)
+
     print('saving smoothed file in %s'%os.path.join(out_dir,new_filename))
     np.save(os.path.join(out_dir,new_filename),out_array)
 

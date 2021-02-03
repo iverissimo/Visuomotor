@@ -28,7 +28,7 @@ with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.y
 
 # define participant number, ROI (if the case) and vertex number and open json parameter file
 if len(sys.argv)<2: 
-    raise NameError('Please add subject number (ex: 01) '	
+    raise NameError('Please add subject number (ex: 01) or "median" '	
                     'as 1st argument in the command line!')	
 
 else:
@@ -61,7 +61,7 @@ if not os.path.exists(figures_pth):
 rsq_threshold = params['plotting']['prf']['rsq_threshold']
 
 # change this to simplify appending all subs and making median plot
-if sj == 'all':
+if sj == 'median':
     all_sj = params['general']['subs']
     sj = [str(x).zfill(2) for _,x in enumerate(all_sj) if x not in params['general']['exclude_subs']]
 else:

@@ -28,7 +28,7 @@ with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.y
 
 # define participant number, ROI (if the case) and vertex number and open json parameter file
 if len(sys.argv)<2: 
-    raise NameError('Please add subject number (ex: 01 or "all") '
+    raise NameError('Please add subject number (ex: 01 or "median") '
                     'as 1st argument in the command line!')
 else:
     sj = str(sys.argv[1]).zfill(2) #fill subject number with 0 in case user forgets
@@ -55,7 +55,7 @@ if not os.path.exists(figures_pth):
 
     
 # change this to simplify appending all subs and making median plot
-if sj == 'all':
+if sj == 'median':
     all_sj = params['general']['subs']
     sj = [str(x).zfill(2) for _,x in enumerate(all_sj) if x not in params['general']['exclude_subs']]
 else:
@@ -145,7 +145,7 @@ for i,s in enumerate(sj):
         
     
 # get median bins for plotting 
-# (useful for all subject plot)
+# (useful for median subject plot)
 
 med_subs_df = []
 
@@ -215,7 +215,7 @@ plt.yticks(fontsize = 18)
 ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
-if sj != 'all':
+if sj != 'median':
     ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
     ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 
@@ -241,7 +241,7 @@ plt.yticks(fontsize = 18)
 ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
-if sj != 'all':
+if sj != 'median':
     ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
     ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 
