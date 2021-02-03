@@ -9,6 +9,8 @@ general:
 
   subs: [1,2,3,4,5,7,8,9,11,12,13]
 
+  HD_screen_subs: [2,11,12,13]
+
   exclude_subs: [3,5,7,13]
 
   tasks: ['prf','soma']
@@ -91,8 +93,12 @@ plotting:
     parietal: ['IPS0','IPS1','IPS2+']
     frontal: ['sPCS','iPCS']
 
+    n_TR: 83 # after cropping (original 90)
+
   soma:
     z_threshold: 2.7
+
+    n_TR: 141
 
 
 fitting:
@@ -117,6 +123,8 @@ fitting:
     extension: 'cropped_sg_psc.func.gii'
 
   soma:
+
+    extension: 'sg_psc.func.gii'
 
     all_contrasts:
       face: ['eyebrows',

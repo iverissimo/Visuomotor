@@ -25,6 +25,8 @@ from PIL import Image, ImageOps
 import math
 import cortex
 
+import matplotlib.pyplot as plt
+
 
 
 def median_gii(files,outdir):
@@ -377,8 +379,13 @@ def screenshot2DM(filenames,scale,screen,outfile,dm_shape = 'rectangle'):
 
 
 def shift_DM(prf_dm):
-    # Very clunky and non-generic function, but works.
-    # should optimize eventually
+
+    """
+    function to shift bars in pRF DM, getting the average bar position 
+    
+    Note: Very clunky and non-generic function, but works.
+     should optimize eventually
+    """
 
     # initialize a new DM with zeros, same shape as initial DM
     avg_prf_dm = np.zeros(prf_dm.shape)
@@ -637,7 +644,8 @@ def mask_estimates(estimates, sub, params, ROI = 'V1', fit_model = 'css'):
     # set limits for xx and yy, forcing it to be within the screen boundaries
     
     # subjects that did pRF task with linux computer, so res was full HD
-    res = params['general']['screenRes_HD'] if sub.zfill(2) in ['02','11','12','13'] else params['general']['screenRes']
+    HD_subs = [str(num).zfill(2) for num in params['general']['HD_screen_subs']] 
+    res = params['general']['screenRes_HD'] if str(sub).zfill(2) in HD_subs else params['general']['screenRes']
     
     max_size = params['fitting']['prf']['max_size']
     
@@ -705,3 +713,204 @@ def align_yaxis(ax1, v1, ax2, v2):
 
 
 
+def smooth_gii(gii_file, outdir, space = 'fsaverage', fwhm = 2):
+
+    """ takes gifti file and smooths it - saves new smoothed gifti
+
+    Parameters
+    ----------
+    gii_file : str
+        absolute path for gifti file
+    outdir: str
+        absolute output dir to save smoothed file
+    space: str
+        subject surface space
+    fwhm : int/float
+        width of the kernel, at half of the maximum of the height of the Gaussian
+    
+    Outputs
+    -------
+    smooth_gii_pth : str 
+        absolute path for smoothed file
+    
+    """
+
+    smooth_gii_pth = []
+
+    if not os.path.isfile(gii_file): # check if file exists
+            print('no file found called %s' %gii_file)
+    else:
+
+        # load with nibabel to save outputs always as gii
+        gii_in = nb.load(gii_file)
+        data_in = np.array([gii_in.darrays[i].data for i in range(len(gii_in.darrays))]) # load surface data
+
+        print('loading file %s' %gii_file)
+
+        # first need to convert to mgz
+        # will be saved in output dir
+        new_mgz = os.path.join(outdir,os.path.split(gii_file)[-1].replace('.func.gii','.mgz'))
+
+        print('converting gifti to mgz as %s' %(new_mgz))
+        os.system('mri_convert %s %s'%(gii_file, new_mgz))
+
+        # now smooth mgz
+        smoother = fs.SurfaceSmooth()
+        smoother.inputs.in_file = new_mgz
+        smoother.inputs.subject_id = space
+
+        # define hemisphere
+        smoother.inputs.hemi = 'lh' if '_hemi-L_' in new_mgz else 'rh'
+        print('smoothing %s' %smoother.inputs.hemi)
+        smoother.inputs.fwhm = fwhm
+        smoother.run() # doctest: +SKIP
+
+        new_filename = os.path.split(new_mgz)[-1].replace('.mgz','_smooth%d.mgz'%(smoother.inputs.fwhm))
+        smooth_mgz = os.path.join(outdir,new_filename)
+        shutil.move(os.path.join(os.getcwd(),new_filename), smooth_mgz) #move to correct dir
+
+        # transform to gii again
+        new_data = surface.load_surf_data(smooth_mgz).T
+
+        smooth_gii_pth = smooth_mgz.replace('.mgz','.func.gii')
+        print('converting to %s' %smooth_gii_pth)
+        os.system('mri_convert %s %s'%(smooth_mgz,smooth_gii_pth))
+
+    return smooth_gii_pth
+
+
+def smooth_nparray(arr_in, header_filename, out_dir, filestr, sub_space = 'fsaverage', n_TR = 83, smooth_fwhm = 2):
+
+    """ takes array with shape (vertices,), with some relevant quantification
+    and smooths it - useful for later plotting of surface map
+
+    Parameters
+    ----------
+    arr_in: array
+        numpy array to be smoothed with shape (vertices,)
+    header_filename: list
+        list of strings with absolute path to gii files to use has header info, should include each hemisphere gii files
+    outdir: str
+        absolute output dir to save smoothed array
+    filestr: str
+        identifier string to add to name of new gii/array (ex: '_rsq')
+    sub_space: str
+        subject surface space
+    n_TR: int
+        number of TRs of task
+    smooth_fwhm : int/float
+        width of the kernel, at half of the maximum of the height of the Gaussian
+
+    Outputs
+    -------
+    out_array: array
+        smoothed numpy array
+    
+    """
+    
+
+    # get mid vertex index (diving hemispheres)
+    left_index = cortex.db.get_surfinfo(sub_space).left.shape[0] 
+
+    # temporary output folder, to save files that will be deleted later
+    new_out = os.path.join(out_dir,'temp_smooth')
+
+    if not os.path.exists(new_out):  # check if path exists
+        os.makedirs(new_out)
+
+    # transform array into gii (to be smoothed)
+    smooth_filename = []
+
+    for field in ['hemi-L', 'hemi-R']:
+
+        if field=='hemi-L':
+            arr_4smoothing = arr_in[0:left_index]
+        else:
+            arr_4smoothing = arr_in[left_index::]
+
+        # load hemi just to get header
+        filename = [gii for _,gii in enumerate(header_filename) if field in gii]
+        img_load = nb.load(filename[0])
+
+        # absolute path of new gii
+        out_filename = os.path.join(new_out, os.path.split(filename[0])[-1].replace('.func.gii',filestr+'.func.gii'))
+
+        print('saving %s'%out_filename)
+        est_array_tiled = np.tile(arr_4smoothing[np.newaxis,...],(n_TR,1)) # NEED TO DO THIS 4 MGZ to actually be read (header is of func file)
+        darrays = [nb.gifti.gifti.GiftiDataArray(d) for d in est_array_tiled]
+        estimates_gii = nb.gifti.gifti.GiftiImage(header = img_load.header,
+                                               extra = img_load.extra,
+                                               darrays = darrays) # need to save as gii
+
+        nb.save(estimates_gii,out_filename)
+    
+        smo_estimates_path = smooth_gii(out_filename, new_out, space = sub_space, fwhm = smooth_fwhm) # smooth it!
+
+        smooth_filename.append(smo_estimates_path)
+        print('saving %s'%smo_estimates_path)
+
+
+    # load both hemis and combine in one array
+    smooth_arr = []
+
+    for _,name in enumerate(smooth_filename): # not elegant but works
+
+        img_load = nb.load(name)
+        smooth_arr.append(np.array([img_load.darrays[i].data for i in range(len(img_load.darrays))]))
+
+    out_array = np.concatenate((smooth_arr[0][0],smooth_arr[1][0]))  
+
+    new_filename = os.path.split(smo_estimates_path)[-1].replace('.func.gii','.npy').replace('hemi-R','hemi-both')
+    print('saving smoothed file in %s'%os.path.join(out_dir,new_filename))
+    np.save(os.path.join(out_dir,new_filename),out_array)
+
+    if os.path.exists(new_out):  # check if path exists
+        print('deleting %s to save memory'%str(new_out))
+        shutil.rmtree(new_out)
+
+    return out_array
+
+
+def normalize(M):
+    """
+    normalize data array
+    """
+    return (M-np.nanmin(M))/(np.nanmax(M)-np.nanmin(M))
+
+
+def make_2D_colormap(rgb_color = '101', bins = 50):
+    """
+    generate 2D basic colormap
+    and save to pycortex filestore
+    """
+    
+    ##generating grid of x bins
+    x,y = np.meshgrid(
+        np.linspace(0,1,bins),
+        np.linspace(0,1,bins)) 
+    
+    # define color combination for plot
+    if rgb_color=='101': #red blue
+        col_grid = np.dstack((x,np.zeros_like(x), y))
+        name='RB'
+    elif rgb_color=='110': # red green
+        col_grid = np.dstack((x, y,np.zeros_like(x)))
+        name='RG'
+    elif rgb_color=='011': # green blue
+        col_grid = np.dstack((np.zeros_like(x),x, y))
+        name='GB'
+    
+    fig = plt.figure(figsize=(1,1))
+    ax = fig.add_axes([0,0,1,1])
+    # plot 
+    plt.imshow(col_grid,
+    extent = (0,1,0,1),
+    origin = 'lower')
+    ax.axis('off')
+
+    rgb_fn = os.path.join(os.path.split(cortex.database.default_filestore)[
+                          0], 'colormaps', 'costum2D_'+name+'_bins_%d.png'%bins)
+
+    plt.savefig(rgb_fn, dpi = 200)
+       
+    return rgb_fn  
