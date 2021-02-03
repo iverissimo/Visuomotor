@@ -110,7 +110,8 @@ png_filename.sort()
 dm_filename = os.path.join(os.getcwd(), 'prf_dm_square.npy')
 
 # subjects that did pRF task with linux computer, so res was full HD
-res = params['general']['screenRes_HD'] if sj in ['02','11','12','13'] else params['general']['screenRes']
+HD_subs = [str(num).zfill(2) for num in params['general']['HD_screen_subs']] 
+res = params['general']['screenRes_HD'] if str(sj).zfill(2) in HD_subs else params['general']['screenRes']
 
 # create design matrix
 screenshot2DM(png_filename, 0.1, res, dm_filename, dm_shape = 'square')  # create it
