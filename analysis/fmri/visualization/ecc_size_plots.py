@@ -215,7 +215,7 @@ plt.yticks(fontsize = 18)
 ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
-if sj != 'median':
+if str(sys.argv[1]).zfill(2) != 'median':
     ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
     ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 
@@ -241,7 +241,7 @@ plt.yticks(fontsize = 18)
 ax.axes.set_xlim(min_ecc,max_ecc)
 ax.axes.set_ylim(0,5)
 
-if sj != 'median':
+if str(sys.argv[1]).zfill(2) != 'median':
     ax.set_xlabel('pRF eccentricity [dva]', fontsize = 20, labelpad = 15)
     ax.set_ylabel('pRF size [dva]', fontsize = 20, labelpad = 15)
 
