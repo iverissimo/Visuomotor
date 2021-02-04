@@ -81,7 +81,7 @@ processing:
 plotting:
 
   prf:
-    rsq_threshold: 0.17
+    rsq_threshold: 0.14 #0.17
 
     n_bins: 10
     min_ecc: 0.25
