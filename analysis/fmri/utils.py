@@ -6,6 +6,7 @@ import numpy as np
 
 import shutil
 
+import pandas as pd
 import nibabel as nb
 
 from nilearn import surface
@@ -26,6 +27,8 @@ import math
 import cortex
 
 import matplotlib.pyplot as plt
+
+from scipy.stats import pearsonr
 
 
 
@@ -918,3 +921,140 @@ def make_2D_colormap(rgb_color = '101', bins = 50):
     plt.savefig(rgb_fn, dpi = 200)
        
     return rgb_fn  
+
+
+def median_soma_events(files,outdir):
+    
+    """ function that makes median event data frame (over runs)
+
+    Parameters
+    ----------
+    files : List/arr
+        list of absolute filenames to do median over
+    outdir : str
+        path to save new files
+    
+
+    Outputs
+    -------
+    median_file: str
+        absolute output filename
+    
+    """
+    
+    # set output name
+    median_file = os.path.join(outdir, re.sub('run-\d{2}_', 'run-median_', os.path.split(files[0])[-1]))
+    
+    if os.path.isfile(median_file):
+        print('file %s already exists'%median_file)
+    else:
+        # list of stimulus onsets
+        print('averaging %d event files'%len(files))
+
+        all_events = []
+        
+        for _,val in enumerate(files):
+
+            events_pd = pd.read_csv(val,sep = '\t')
+
+            new_events = []
+
+            for ev in events_pd.iterrows():
+                row = ev[1]   
+                if row['trial_type'][0] == 'b': # if both hand/leg then add right and left events with same timings
+                    new_events.append([row['onset'],row['duration'],'l'+row['trial_type'][1:]])
+                    new_events.append([row['onset'],row['duration'],'r'+row['trial_type'][1:]])
+                else:
+                    new_events.append([row['onset'],row['duration'],row['trial_type']])
+
+            df = pd.DataFrame(new_events, columns=['onset','duration','trial_type'])  #make sure only relevant columns present
+            all_events.append(df)
+
+        # make median event dataframe
+        onsets = []
+        durations = []
+        for w in range(len(all_events)):
+            onsets.append(all_events[w]['onset'])
+            durations.append(all_events[w]['duration'])
+
+        events_avg = pd.DataFrame({'onset':np.median(np.array(onsets),axis=0),
+                                   'duration':np.median(np.array(durations),axis=0),
+                                   'trial_type':all_events[0]['trial_type']})
+        # save with output name
+        events_avg.to_csv(median_file, sep="\t")
+        
+        print('computed median events')
+
+    return median_file    
+
+
+def fit_glm(voxel, dm):
+    
+    """ GLM fit on timeseries
+    Regress a created design matrix on the input_data.
+
+    Parameters
+    ----------
+    voxel : arr
+        timeseries of a single voxel
+    dm : arr
+        DM array (#TR,#regressors)
+    
+
+    Outputs
+    -------
+    prediction : arr
+        model fit for voxel
+    betas : arr
+        betas for model
+    r2 : arr
+        coefficient of determination
+    mse : arr
+        mean of the squared residuals
+    
+    """
+
+    if np.isnan(voxel).any():
+        betas = np.nan
+        prediction = np.nan
+        mse = np.nan
+        r2 = np.nan
+
+    else:   # if not nan (some vertices might have nan values)
+        betas = np.linalg.lstsq(dm, voxel, rcond = -1)[0]
+        prediction = dm.dot(betas)
+
+        mse = np.mean((voxel - prediction) ** 2) # calculate mean of squared residuals
+        r2 = pearsonr(prediction, voxel)[0] ** 2 # and the rsq
+    
+    return prediction, betas, r2, mse
+
+
+def leave_one_out(input_list):
+
+    """ make list of lists, by leaving one out
+
+    Parameters
+    ----------
+    input_list : list/arr
+        list of items
+
+    Outputs
+    -------
+    out_lists : list/arr
+        list of lists, with each element
+        of the input_list left out of the returned lists once, in order
+
+    
+    """
+
+    out_lists = []
+    for x in input_list:
+        out_lists.append([y for y in input_list if y != x])
+
+    return out_lists
+
+
+
+
+
