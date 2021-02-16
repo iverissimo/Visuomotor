@@ -192,7 +192,7 @@ for ind,s in enumerate(sj):
         stats_all[str(region)] = np.load(stats_filename,allow_pickle=True)
         
         # save thresholded z-scores for each region 
-        z_masked_file = os.path.join(out_pth,'zscore_thresh-%.2f_%s_vs_all_contrast.npz' %(z_threshold,region))
+        z_masked_file = os.path.join(out_pth,'zscore_thresh-%.2f_%s_vs_all_contrast' %(z_threshold,region))
         
         if not os.path.isfile(z_masked_file): # if doesn't exist already
             z_masked = mask_arr(stats_all[region]['zscore'],
