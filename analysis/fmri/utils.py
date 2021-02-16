@@ -10,6 +10,7 @@ import pandas as pd
 import nibabel as nb
 
 from nilearn import surface
+import nistats
 
 from scipy.signal import savgol_filter
 import nipype.interfaces.freesurfer as fs
@@ -1180,22 +1181,56 @@ def compute_stats(voxel, dm, contrast,betas):
         design_var = design_variance(dm, contrast)
         
         # sum of squared errors
-        sse = np.sum((voxel - (dm.dot(betas))) ** 2) 
+        sse = ((voxel - (dm.dot(betas))) ** 2).sum() 
         
         #degrees of freedom = N - P = timepoints - predictores
-        df = (voxel.size - dm.shape[1])
+        df = (dm.shape[0] - dm.shape[1])
         
         # t statistic for vertex
         t_val = contrast.dot(betas) / np.sqrt((sse/df) * design_var)
         
-        # take the absolute by np.abs(t)
-        p_val = t.sf(np.abs(t_val), df) * 2 # multiply by two to create a two-tailed p-value
-        
+        # compute the p-value (right-tailed)
+        p_val = t.sf(t_val, df) 
+
         # z-score corresponding to certain p-value
-        pvalue = np.clip(p_val, 1.e-300, 1. - 1.e-16) # to ensure that zstats will not reach infinity
-        z_score = norm.isf(pvalue)
+        z_score = norm.isf(np.clip(p_val, 1.e-300, 1. - 1.e-16)) # deal with inf values of scipy
         
 
     return t_val,p_val,z_score
 
 
+def mask_arr(arr, threshold = 0, side = 'above'):
+    
+    ''' mask array given a threshold value
+        
+        Parameters
+        ----------
+        arr : arr
+            array with data to threshold (ex: zscores)
+        threshold : int/float
+            threshold value
+        side : str
+            'above'/'below'/'both', indicating if output masked values will be
+             above threshold, below -threshold or both
+        
+        Outputs
+        -------
+        data_threshed : arr
+            thresholded data
+    '''
+
+    # set at nan whatever is outside thresh
+    data_threshed = np.zeros(arr.shape); data_threshed[:]=np.nan 
+
+    for i,value in enumerate(arr):
+        if side == 'above':
+            if value > threshold:
+                data_threshed[i] = value
+        elif side == 'below':
+            if value < -threshold:
+                data_threshed[i] = value
+        elif side == 'both':
+            if value < -threshold or value > threshold:
+                data_threshed[i] = value
+
+    return data_threshed

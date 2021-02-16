@@ -96,7 +96,7 @@ plotting:
     n_TR: 83 # after cropping (original 90)
 
   soma:
-    z_threshold: 2.7
+    z_threshold: 3.1 #2.7
 
     n_TR: 141
 
