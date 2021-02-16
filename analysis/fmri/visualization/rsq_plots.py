@@ -49,6 +49,7 @@ fit_model = params['fitting']['prf']['fit_model']
 
 # estimates file extensions
 estimate_prf_ext = file_extension['prf'].replace('.func.gii','')+'_'+fit_model+'_estimates.npz'
+estimate_soma_ext = file_extension['soma'].replace('.func.gii','')+'_estimates.npz'
 
 # paths
 fit_where = params['general']['paths']['fitting']['where'] # where we are working
@@ -60,6 +61,7 @@ if not os.path.exists(figures_pth):
 
 # set threshold for plotting
 rsq_threshold = params['plotting']['prf']['rsq_threshold']
+z_threshold = params['plotting']['soma']['z_threshold']
 
 # change this to simplify appending all subs and making median plot
 if sj == 'median':
@@ -70,6 +72,8 @@ else:
 
 # set hemifiled names
 hemi = ['hemi-L','hemi-R']
+
+#### visual task ####
 
 # get vertices for subject fsaverage
 ROIs = params['plotting']['prf']['ROIs']
@@ -153,12 +157,90 @@ plt.ylim(0,1)
 
 fig.savefig(os.path.join(figures_pth,'rsq_visual_violinplot.svg'), dpi=100)
 
+
+#### motor task ####
+
+ROIs = list(params['fitting']['soma']['all_contrasts'].keys()) # list of key names (of different body regions)
+
+for idx,rois_ks in enumerate(['None']+ROIs):
+
+    for i,s in enumerate(sj): # for each subject (if all)
+        
+        fits_pth = os.path.join(deriv_pth,'soma_fit','sub-{sj}'.format(sj = s)) # path to pRF fits
+        
+        if rois_ks == 'None': # save rsq of all vertices
+            
+            estimates_filename = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(fits_pth)) if 'hemi-both' in x and x.endswith(estimate_soma_ext)][0]
+            estimates = np.load(estimates_filename,allow_pickle = True)
+            all_rsq = estimates['r2']
+            new_rsq = all_rsq.copy()
+        
+        else:
+            zmask_filename = os.path.join(fits_pth,'zscore_thresh-%.2f_%s_vs_all_contrast.npy' %(z_threshold,rois_ks))
+            zmask = np.load(zmask_filename, allow_pickle = True)
+            
+            # mask rsq - only significant voxels for region
+            new_rsq = all_rsq.copy()
+            new_rsq[np.isnan(zmask)] = np.nan
+            
+        # save values in DF
+        if idx == 0 and i == 0:
+            df_rsq = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s})
+        else:
+            df_rsq = df_rsq.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s}))
+
+
+# do median (for when we are looking at all subs)
+for idx,rois_ks in enumerate(ROIs+['None']):   
+    
+    rsq_4plot = []
+
+    for i,s in enumerate(sj): # for each subject (if all)
+
+        rsq_4plot.append(list(df_rsq.loc[(df_rsq['roi'] == rois_ks)&(df_rsq['sub'] == s)]['rsq'][0]))
+
+    new_rsq4plot = np.nanmedian(np.array(rsq_4plot), axis = 0)
+    
+    if rois_ks == 'None':
+        rsq_soma = new_rsq4plot.copy()
+            
+    # save values in DF
+    if idx == 0:
+        df_rsq_median = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq4plot]})
+    else:
+        df_rsq_median = df_rsq_median.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq4plot]}))
+
+
+# plot violin of distribution of RSQ
+fig = plt.figure(num=None, figsize=(15,7.5), dpi=100, facecolor='w', edgecolor='k')
+
+df_soma_plot = df_rsq_median[df_rsq_median['roi'].isin(ROIs)]
+df_soma_plot = df_soma_plot.explode('rsq')
+df_soma_plot['rsq'] = df_soma_plot['rsq'].astype('float')
+
+v1 = sns.violinplot(data = df_soma_plot, x = 'roi', y = 'rsq',cut=0, inner='box', palette='Set3',linewidth=1.5)
+
+v1.set(xlabel=None)
+v1.set(ylabel=None)
+v1.set_xticklabels(['Face','Hands','Feet'])
+
+#plt.margins(y=0.025)
+#sns.swarmplot(x='ecc', y='cs', data=crwd_df4plot,color=".25",alpha=0.5)
+plt.xticks(fontsize = 15)
+plt.yticks(fontsize = 15)
+
+plt.xlabel('ROI',fontsize = 20,labelpad=16)
+plt.ylabel('RSQ',fontsize = 20,labelpad=16)
+plt.ylim(0,1)
+fig.savefig(os.path.join(figures_pth,'rsq_soma_violinplot.svg'), dpi=100)
+
+
 # smooth rsq for, to plot in flatmap
 # visual already masked, not thresholded
 
 tasks = params['general']['tasks']
 
-for _,tsk in enumerate(['prf']):#tasks):
+for _,tsk in enumerate(tasks):
     
     # path to save compute estimates
     out_estimates_dir = os.path.join(deriv_pth,'estimates',tsk,'sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)))
@@ -177,6 +259,8 @@ for _,tsk in enumerate(['prf']):#tasks):
         print('loading %s'%smooth_file)
         if tsk == 'prf':
             rsq_visual_smooth = np.load(smooth_file) # load
+        elif tsk == 'soma': 
+            rsq_soma_smooth = np.load(smooth_file) # load
         
     else: # smooth rsq
         if tsk == 'prf':
@@ -188,15 +272,24 @@ for _,tsk in enumerate(['prf']):#tasks):
                                                n_TR = params['plotting'][tsk]['n_TR'], 
                                                smooth_fwhm = params['processing']['smooth_fwhm'],
                                                sub_ID = str(sys.argv[1]).zfill(2))
+        elif tsk == 'soma':
+            rsq_soma_smooth = smooth_nparray(rsq_soma, 
+                                               post_proc_gii, 
+                                               out_estimates_dir, 
+                                               '_rsq', 
+                                               sub_space = params['processing']['space'], 
+                                               n_TR = params['plotting'][tsk]['n_TR'], 
+                                               smooth_fwhm = params['processing']['smooth_fwhm'],
+                                               sub_ID = str(sys.argv[1]).zfill(2))
 
-    
 
 # do this to replace nans with 0s, so flatmaps look nicer
 rsq_visual_smooth = np.array([x if np.isnan(x)==False else 0 for _,x in enumerate(rsq_visual_smooth)])
+rsq_soma_smooth = np.array([x if np.isnan(x)==False else 0 for _,x in enumerate(rsq_soma_smooth)])
 
 # normalize RSQ 
 rsq_visual_smooth_norm = normalize(rsq_visual_smooth) 
-
+rsq_soma_smooth_norm = normalize(rsq_soma_smooth) 
 
 # create costume colormp red blue
 n_bins = 256
@@ -216,7 +309,66 @@ images['rsq_visual_norm'] = cortex.Vertex(rsq_visual_smooth_norm,
 #cortex.quickshow(images['rsq_visual_norm'],with_curvature=True,with_sulci=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_visual.svg')
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['rsq_visual_norm'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
+_ = cortex.quickflat.make_png(filename, images['rsq_visual_norm'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+
+images['rsq_soma_norm'] = cortex.Vertex(rsq_soma_smooth_norm, 
+                                          params['processing']['space'],
+                                           vmin = 0, vmax = .7,
+                                           cmap='Blues')
+#cortex.quickshow(images['rsq_soma_norm'],with_curvature=True,with_sulci=True)
+filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_soma.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['rsq_soma_norm'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+
+images['rsq_combined'] = cortex.Vertex2D(rsq_visual_smooth_norm,rsq_soma_smooth_norm, 
+                                        subject = params['processing']['space'],
+                                        vmin = 0.125, vmax = 0.2,
+                                        vmin2 = 0.2,vmax2 = 0.6,
+                                        cmap = col2D_name)
+#cortex.quickshow(images['rsq_combined'],recache=True,with_curvature=True,with_sulci=True,with_roi=False,with_labels=False)#,height=2048)
+filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_multimodal.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['rsq_combined'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+# Plot a flatmap with the data projected onto the surface
+# Highlight the curvature and which cutout to be displayed
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_left'
+_ = cortex.quickflat.make_figure(images['rsq_combined'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name)#,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-rsquared-normalized_combined_bins-%d.svg'%n_bins)
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['rsq_combined'], recache=True,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False)#,height=2048)
+
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_right'
+_ = cortex.quickflat.make_figure(images['rsq_combined'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name)#,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-rsquared-normalized_combined_bins-%d.svg'%n_bins)
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['rsq_combined'], recache=True,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False)#,height=2048)
+
+
+
+
+
+
 
 
 
