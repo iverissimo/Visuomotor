@@ -30,7 +30,7 @@ import cortex
 import matplotlib.pyplot as plt
 
 from scipy.stats import pearsonr, t, norm
-
+from scipy import ndimage
 
 
 def median_gii(files,outdir):
@@ -246,83 +246,6 @@ def psc_gii(gii_file,outpth, method='median', extension = '.func.gii'):
 
     return psc_gii, psc_gii_pth
 
-
-def smooth_gii(gii_file, outdir, fwhm = 5, extension = '.func.gii'):
-
-    """ percent signal change gii file
-
-    Parameters
-    ----------
-    gii_file : str
-        absolute filename for gii
-    outdir: str
-        path to save new files
-    fwhm: int
-        width of the kernel, at half of the maximum of the height of the Gaussian
-    extension: str
-        file extension
-
-    Outputs
-    -------
-    smooth_gii: arr
-        np array with smoothed file
-    smooth_gii_pth: str
-        absolute path for smoothed file
-    
-    """
-
-    outfile = os.path.split(gii_file)[-1].replace(extension,'_smooth%d'%fwhm+extension)
-    smooth_gii_pth = os.path.join(outdir,outfile)
-
-    if not os.path.isfile(gii_file): # check if file exists
-            print('no file found called %s' %gii_file)
-            smooth_gii = []
-            smooth_gii_pth = []
-
-    elif os.path.isfile(smooth_gii_pth): # if psc file exists, skip
-        print('File {} already in folder, skipping'.format(smooth_gii_pth))
-        smooth_gii = nb.load(smooth_gii_pth)
-        smooth_gii = np.array([smooth_gii.darrays[i].data for i in range(len(smooth_gii.darrays))]) #load surface data
-
-    else:
-
-        # load with nibabel instead to save outputs always as gii
-        gii_in = nb.load(gii_file)
-        data_in = np.array([gii_in.darrays[i].data for i in range(len(gii_in.darrays))]) #load surface data
-
-        print('loading file %s' %gii_file)
-
-        # first need to convert to mgz
-        # will be saved in output dir
-        new_mgz = os.path.join(outdir,os.path.split(gii_file)[-1].replace(extension,'.mgz'))
-
-        print('converting gifti to mgz as %s' %(new_mgz))
-        os.system('mri_convert %s %s'%(gii_file,new_mgz))
-
-        # now smooth it
-        smoother = fs.SurfaceSmooth()
-        smoother.inputs.in_file = new_mgz
-        smoother.inputs.subject_id = 'fsaverage'
-
-        # define hemisphere
-        smoother.inputs.hemi = 'lh' if '_hemi-L' in new_mgz else 'rh'
-        print('smoothing %s' %smoother.inputs.hemi)
-        smoother.inputs.fwhm = fwhm
-        smoother.run() # doctest: +SKIP
-
-        new_filename = os.path.split(new_mgz)[-1].replace('.mgz','_smooth%d.mgz'%(smoother.inputs.fwhm))
-        smooth_mgz = os.path.join(outdir,new_filename)
-        shutil.move(os.path.join(os.getcwd(),new_filename), smooth_mgz) #move to correct dir
-
-        # transform to gii again
-        smooth_gii = surface.load_surf_data(smooth_mgz).T
-        smooth_gii = np.array(smooth_gii)
-
-        smooth_gii_pth = smooth_mgz.replace('.mgz',extension)
-        print('converting to %s' %smooth_gii_pth)
-        os.system('mri_convert %s %s'%(smooth_mgz,smooth_gii_pth))
-
-    return smooth_gii,smooth_gii_pth
 
 
 def screenshot2DM(filenames,scale,screen,outfile,dm_shape = 'rectangle'):
@@ -1111,7 +1034,7 @@ def set_contrast(dm_col,tasks,contrast_val=[1],num_cond=1):
 
 
 
-def compute_stats(voxel, dm, contrast,betas):
+def compute_stats(voxel, dm, contrast, betas, pvalue = 'oneside'):
     
     """ compute statistis for GLM
 
@@ -1125,6 +1048,8 @@ def compute_stats(voxel, dm, contrast,betas):
         contrast vector
     betas : arr
         betas for model at that voxel
+    pvalue : str
+        type of tail for p-value - 'oneside'/'twoside'
 
     Outputs
     -------
@@ -1188,13 +1113,20 @@ def compute_stats(voxel, dm, contrast,betas):
         
         # t statistic for vertex
         t_val = contrast.dot(betas) / np.sqrt((sse/df) * design_var)
-        
-        # compute the p-value (right-tailed)
-        p_val = t.sf(t_val, df) 
 
-        # z-score corresponding to certain p-value
-        z_score = norm.isf(np.clip(p_val, 1.e-300, 1. - 1.e-16)) # deal with inf values of scipy
-        
+        if pvalue == 'oneside': 
+            # compute the p-value (right-tailed)
+            p_val = t.sf(t_val, df) 
+
+            # z-score corresponding to certain p-value
+            z_score = norm.isf(np.clip(p_val, 1.e-300, 1. - 1.e-16)) # deal with inf values of scipy
+
+        elif pvalue == 'twoside':
+            # take the absolute by np.abs(t)
+            p_val = t.sf(np.abs(t_val), df) * 2 # multiply by two to create a two-tailed p-value
+
+            # z-score corresponding to certain p-value
+            z_score = norm.isf(np.clip(p_val/2, 1.e-300, 1. - 1.e-16)) # deal with inf values of scipy
 
     return t_val,p_val,z_score
 
@@ -1234,3 +1166,31 @@ def mask_arr(arr, threshold = 0, side = 'above'):
                 data_threshed[i] = value
 
     return data_threshed
+
+
+def COM(data):
+    
+    """ given an array of values x vertices, 
+    compute center of mass 
+
+    Parameters
+    ----------
+    data : List/arr
+        array with values to COM  (elements,vertices)
+
+    Outputs
+    -------
+    center_mass : arr
+        array with COM for each vertex
+    """
+    
+    # first normalize data, to fix issue of negative values
+    norm_data = np.array([normalize(data[...,x]) for x in range(data.shape[-1])])
+    norm_data = norm_data.T
+    
+    #then calculate COM for each vertex
+    center_mass = np.array([ndimage.measurements.center_of_mass(norm_data[...,x]) for x in range(norm_data.shape[-1])])
+
+    return center_mass.T[0]
+
+
