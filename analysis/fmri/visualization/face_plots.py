@@ -84,9 +84,6 @@ for i,s in enumerate(sj): # for each subject (if all)
     # load z-score localizer area, for face movements
     z_masked = np.load(os.path.join(fits_pth,'zscore_thresh-%.2f_face_vs_all_contrast.npy' %(z_threshold)), allow_pickle=True)
     
-    # append for later plotting
-    all_zmasked.append(z_masked)
-    
     # load beta estimates
     estimates_filename = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(fits_pth)) if x.endswith(file_extension.replace('.func.gii','_estimates.npz'))][0]
     soma_estimates = np.load(estimates_filename,allow_pickle=True)
@@ -148,7 +145,6 @@ for i,s in enumerate(sj): # for each subject (if all)
 
 
         # mask betas for vertices within region
-        #betas_masked = new_betas[...,reg_ind].copy()
         betas_smooth[np.isnan(z_masked)] = np.nan
 
         betas_reg.append(betas_smooth)
@@ -159,46 +155,51 @@ for i,s in enumerate(sj): # for each subject (if all)
     print('Computing center of mass for face elements %s' %(params['fitting']['soma']['all_contrasts']['face']))
     allparts_COM = COM(betas_reg)
 
+    # append for later plotting
     all_COM.append(allparts_COM)
+
+    # check if smoothed file exists, if not smooth it for plotting
+    z_smooth_filename = [os.path.join(sub_out_estimates_dir,x) for _,x in enumerate(os.listdir(sub_out_estimates_dir)) 
+                         if x.endswith('zscore_thresh-%.2f_face_vs_all_contrast.npy'.replace('.npy','_smooth%d.npy'%params['processing']['smooth_fwhm'])%(z_threshold))]
+
+    if not z_smooth_filename: # if no smooth file exists
+
+        # get path to post_fmriprep files, for header info 
+        post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep', 'soma','sub-{sj}'.format(sj = s), 'median')
+        post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension)]
+        post_proc_gii.sort()
+        
+        z_smooth = smooth_nparray(z_masked, 
+                                   post_proc_gii, 
+                                   sub_out_estimates_dir, 
+                                   '_zscore_thresh-%.2f_face_vs_all_contrast'%(z_threshold), 
+                                   sub_space = params['processing']['space'], 
+                                   n_TR = params['plotting']['soma']['n_TR'], 
+                                   smooth_fwhm = params['processing']['smooth_fwhm'],
+                                   sub_ID = str(sys.argv[1]).zfill(2))
+
+    else:
+        print('loading %s'%z_smooth_filename[0])
+        z_smooth = np.load(z_smooth_filename[0])
+
+    
+    # append for later plotting
+    all_zmasked.append(z_smooth)
 
 
 # now do median (for when we are looking at all subs)
 all_zmasked_median = np.nanmedian(np.array(all_zmasked), axis = 0)
 all_COM_median = np.nanmedian(np.array(all_COM), axis = 0)
 
-# check if smoothed file exists, if not smooth it for plotting
-z_smooth_filename = [os.path.join(out_estimates_dir,x) for _,x in enumerate(os.listdir(out_estimates_dir)) 
-                     if x.endswith('zscore_thresh-%.2f_face_vs_all_contrast.npy'.replace('.npy','_smooth%d.npy'%params['processing']['smooth_fwhm'])%(z_threshold))]
-
-if not z_smooth_filename: # if no smooth file exists
-
-    # get path to post_fmriprep files, for header info 
-    post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep', 'soma','sub-{sj}'.format(sj = sj[0]), 'median')
-    post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension)]
-    post_proc_gii.sort()
-    
-    z_smooth = smooth_nparray(all_zmasked_median, 
-                               post_proc_gii, 
-                               out_estimates_dir, 
-                               '_zscore_thresh-%.2f_face_vs_all_contrast'%(z_threshold), 
-                               sub_space = params['processing']['space'], 
-                               n_TR = params['plotting']['soma']['n_TR'], 
-                               smooth_fwhm = params['processing']['smooth_fwhm'],
-                               sub_ID = str(sys.argv[1]).zfill(2))
-
-else:
-    print('loading %s'%z_smooth_filename[0])
-    z_smooth = np.load(z_smooth_filename[0])
-    
 
 # now plot in surface and save figure
 images = {}
 
 # need to mask again because smoothing removes nans
-z_smooth = mask_arr(z_smooth, threshold = z_threshold, side = 'above')
+all_zmasked_median = mask_arr(all_zmasked_median, threshold = z_threshold, side = 'above')
 
 # vertex for face vs all others
-images['v_face'] = cortex.Vertex(z_smooth, params['processing']['space'],
+images['v_face'] = cortex.Vertex(all_zmasked_median, params['processing']['space'],
                            vmin=0, vmax=7,
                            cmap='Blues')
 
@@ -208,7 +209,7 @@ print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_face'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
 # ignore smoothed nan voxels
-all_COM_median[np.isnan(z_smooth)] = np.nan
+all_COM_median[np.isnan(all_zmasked_median)] = np.nan
 
 # 'eyebrows', 'eyes', 'mouth','tongue', , combined
 images['v_facecombined'] = cortex.Vertex(all_COM_median, 'fsaverage',
