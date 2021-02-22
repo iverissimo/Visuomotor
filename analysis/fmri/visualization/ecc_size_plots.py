@@ -69,13 +69,15 @@ roi_verts = {} #empty dictionary
 for _,val in enumerate(ROIs):
     roi_verts[val] = cortex.get_roi_verts(params['processing']['space'],val)[val]
 
-
 # create empty dataframe to store all relevant values for rois
 all_roi = [] 
 n_bins = params['plotting']['prf']['n_bins']
 min_ecc = params['plotting']['prf']['min_ecc']
 max_ecc = params['plotting']['prf']['max_ecc']
 rsq_threshold = params['plotting']['prf']['rsq_threshold']
+
+# to use later in flatmaps
+estimates_dict_smooth = {'rsq': [], 'size': [], 'x': [], 'y': []}
 
 for i,s in enumerate(sj):
 
@@ -98,6 +100,50 @@ for i,s in enumerate(sj):
     print('masking estimates')
     masked_est = mask_estimates(estimates, s, params, ROI = 'None', fit_model = fit_model)
     
+    # save some estimates in dict
+    estimates_dict = {'rsq': masked_est['rsq'],
+                      'size': masked_est['size'],
+                      'x': masked_est['x'],
+                      'y': masked_est['y']}
+    
+    ## now smooth estimates and save
+    
+    # path to save compute estimates
+    out_estimates_dir = os.path.join(deriv_pth,'estimates','prf','sub-{sj}'.format(sj = s))
+    if not os.path.exists(out_estimates_dir):
+        os.makedirs(out_estimates_dir) 
+
+    # get path to post_fmriprep files, for header info 
+    post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.format(sj = s), 'median')
+    post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension)]
+    post_proc_gii.sort()
+
+    ## smooth for flatmaps
+    for _,est in enumerate(estimates_dict.keys()):
+        
+        smooth_file = os.path.split(post_proc_gii[0])[-1].replace('hemi-L','hemi-both').replace('.func.gii','_%s_smooth%d.npy'%(est,params['processing']['smooth_fwhm']))
+        smooth_file = os.path.join(out_estimates_dir,smooth_file.replace('sub-{sj}'.format(sj = s),'sub-{sj}'.format(sj = s)))
+
+        if os.path.isfile(smooth_file): # if smooth file exists
+            print('loading %s'%smooth_file)
+            estimates_dict[est] = np.load(smooth_file) # load                      
+
+        else: # smooth array
+
+            estimates_dict[est] = smooth_nparray(estimates_dict[est], 
+                                                   post_proc_gii, 
+                                                   out_estimates_dir, 
+                                                   '_%s'%est, 
+                                                   sub_space = params['processing']['space'], 
+                                                   n_TR = params['plotting']['prf']['n_TR'], 
+                                                   smooth_fwhm = params['processing']['smooth_fwhm'],
+                                                   sub_ID = s)
+
+        # append smooth estimates
+        estimates_dict_smooth[est].append(estimates_dict[est])
+
+    
+    # now select estimates per ROI
     
     for idx,roi in enumerate(ROIs): # go over ROIs
         
@@ -142,7 +188,7 @@ for i,s in enumerate(sj):
                                                    'mean_size': mean_size,'mean_size_std': mean_size_std,
                                                    'ROI': np.tile(roi,n_bins),'sub': np.tile(s,n_bins)}),ignore_index=True)
     
-        
+           
     
 # get median bins for plotting 
 # (useful for median subject plot)
@@ -249,6 +295,109 @@ if str(sys.argv[1]).zfill(2) != 'median':
 sns.despine(offset=15)
 fig1 = plt.gcf()
 fig1.savefig(os.path.join(figures_pth,'%s_ecc_vs_size_binned_rsq-%0.2f.svg'%(str(roi2plot),rsq_threshold)), dpi=100,bbox_inches = 'tight')
+
+
+# now do median estimates (for when we are looking at all subs)
+
+xx_median = np.nanmedian(np.array(estimates_dict_smooth['x']), axis = 0)
+yy_median = np.nanmedian(np.array(estimates_dict_smooth['y']), axis = 0)
+rsq_median = np.nanmedian(np.array(estimates_dict_smooth['rsq']), axis = 0)
+size_median = np.nanmedian(np.array(estimates_dict_smooth['size']), axis = 0)
+
+# compute eccentricity
+complex_location = xx_median + yy_median * 1j
+ecc_median = np.abs(complex_location)
+
+# mask within rsq threshold
+ecc_median[rsq_median<=rsq_threshold] = np.nan
+size_median[rsq_median<=rsq_threshold] = np.nan
+
+# plot 
+images = {}
+
+## Plot size
+images['ecc'] = cortex.Vertex(ecc_median, 'fsaverage',
+                           vmin=0, vmax=6,
+                           cmap='J4')
+#cortex.quickshow(images['ecc'],with_curvature=True,with_sulci=True,with_labels=False)
+
+filename = os.path.join(figures_pth,'flatmap_space-fsaverage_rsq-%0.2f_type-ecc.svg' %rsq_threshold)
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['ecc'], recache=True,with_colorbar=False,with_curvature=True,with_sulci=True,with_labels=False)
+
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_left'
+_ = cortex.quickflat.make_figure(images['ecc'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-ecc.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['ecc'], recache=False,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_right'
+_ = cortex.quickflat.make_figure(images['ecc'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-ecc.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['ecc'], recache=False,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+# do same for size
+
+images['size'] = cortex.dataset.Vertex(size_median, 'fsaverage',
+                           vmin=0, vmax=6, 
+                           cmap='viridis_r')
+cortex.quickshow(images['size'],with_curvature=True,with_sulci=True)
+
+filename = os.path.join(figures_pth,'flatmap_space-fsaverage_rsq-%0.2f_type-size.svg' %rsq_threshold)
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['size'], recache=True,with_colorbar=False,with_curvature=True,with_sulci=True,with_labels=False)
+
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_left'
+_ = cortex.quickflat.make_figure(images['size'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-size.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['size'], recache=False,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_right'
+_ = cortex.quickflat.make_figure(images['size'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-size.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['size'], recache=False,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+
+
+
+
+
+
 
 
 
