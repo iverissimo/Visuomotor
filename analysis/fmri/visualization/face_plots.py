@@ -84,6 +84,11 @@ for i,s in enumerate(sj): # for each subject (if all)
     # load z-score localizer area, for face movements
     z_masked = np.load(os.path.join(fits_pth,'zscore_thresh-%.2f_face_vs_all_contrast.npy' %(z_threshold)), allow_pickle=True)
     
+    # sub specific plots should be save in sub folder (for sanity checking)
+    sub_out_estimates_dir = out_estimates_dir.replace('sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)),'sub-{sj}'.format(sj = s))
+    if not os.path.exists(sub_out_estimates_dir):
+        os.makedirs(sub_out_estimates_dir)
+
     # load beta estimates
     estimates_filename = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(fits_pth)) if x.endswith(file_extension.replace('.func.gii','_estimates.npz'))][0]
     soma_estimates = np.load(estimates_filename,allow_pickle=True)
@@ -111,18 +116,16 @@ for i,s in enumerate(sj): # for each subject (if all)
     # load and append each face part beta value in list
     betas_reg = [] 
 
-    for _,part in enumerate(regressors):
+    for k,part in enumerate(regressors):
 
         # get regressor index
         reg_ind = np.where(all_regressors==part)[0][0]
         
-        # smooth betas for that regressor (for plotting)
-        
         # check if smoothed file exists, if not smooth it for plotting
-        sub_out_estimates_dir = out_estimates_dir.replace('sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)),'sub-{sj}'.format(sj = s))
         betas_smooth_filename = [os.path.join(sub_out_estimates_dir,x) for _,x in enumerate(os.listdir(sub_out_estimates_dir)) 
                              if x.endswith('betas-%s_smooth%d.npy'%(part, params['processing']['smooth_fwhm']))]
 
+        # smooth betas for that regressor (for plotting)
         if not betas_smooth_filename: # if no smooth file exists
 
             # get path to post_fmriprep files, for header info 
@@ -137,15 +140,43 @@ for i,s in enumerate(sj): # for each subject (if all)
                                            sub_space = params['processing']['space'], 
                                            n_TR = params['plotting']['soma']['n_TR'], 
                                            smooth_fwhm = params['processing']['smooth_fwhm'],
-                                           sub_ID = str(sys.argv[1]).zfill(2))
+                                           sub_ID = s)
 
         else:
             print('loading %s'%betas_smooth_filename[0])
             betas_smooth = np.load(betas_smooth_filename[0])
 
 
-        # mask betas for vertices within region
-        betas_smooth[np.isnan(z_masked)] = np.nan
+        if k == 0:
+            # do same for z-score 
+            # check if smoothed file exists, if not smooth it for plotting
+            z_smooth_filename = [os.path.join(sub_out_estimates_dir,x) for _,x in enumerate(os.listdir(sub_out_estimates_dir)) 
+                                 if x.endswith('zscore_thresh-%.2f_face_vs_all_contrast.npy'.replace('.npy','_smooth%d.npy'%params['processing']['smooth_fwhm'])%(z_threshold))]
+
+            if not z_smooth_filename: # if no smooth file exists
+
+                # get path to post_fmriprep files, for header info 
+                post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep', 'soma','sub-{sj}'.format(sj = s), 'median')
+                post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension)]
+                post_proc_gii.sort()
+                
+                z_smooth = smooth_nparray(z_masked, 
+                                           post_proc_gii, 
+                                           sub_out_estimates_dir, 
+                                           '_zscore_thresh-%.2f_face_vs_all_contrast'%(z_threshold), 
+                                           sub_space = params['processing']['space'], 
+                                           n_TR = params['plotting']['soma']['n_TR'], 
+                                           smooth_fwhm = params['processing']['smooth_fwhm'],
+                                           sub_ID = s)
+
+            else:
+                print('loading %s'%z_smooth_filename[0])
+                z_smooth = np.load(z_smooth_filename[0])
+
+            
+            # append for later plotting
+            all_zmasked.append(z_smooth)
+         
 
         betas_reg.append(betas_smooth)
 
@@ -158,34 +189,7 @@ for i,s in enumerate(sj): # for each subject (if all)
     # append for later plotting
     all_COM.append(allparts_COM)
 
-    # check if smoothed file exists, if not smooth it for plotting
-    z_smooth_filename = [os.path.join(sub_out_estimates_dir,x) for _,x in enumerate(os.listdir(sub_out_estimates_dir)) 
-                         if x.endswith('zscore_thresh-%.2f_face_vs_all_contrast.npy'.replace('.npy','_smooth%d.npy'%params['processing']['smooth_fwhm'])%(z_threshold))]
-
-    if not z_smooth_filename: # if no smooth file exists
-
-        # get path to post_fmriprep files, for header info 
-        post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep', 'soma','sub-{sj}'.format(sj = s), 'median')
-        post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension)]
-        post_proc_gii.sort()
-        
-        z_smooth = smooth_nparray(z_masked, 
-                                   post_proc_gii, 
-                                   sub_out_estimates_dir, 
-                                   '_zscore_thresh-%.2f_face_vs_all_contrast'%(z_threshold), 
-                                   sub_space = params['processing']['space'], 
-                                   n_TR = params['plotting']['soma']['n_TR'], 
-                                   smooth_fwhm = params['processing']['smooth_fwhm'],
-                                   sub_ID = str(sys.argv[1]).zfill(2))
-
-    else:
-        print('loading %s'%z_smooth_filename[0])
-        z_smooth = np.load(z_smooth_filename[0])
-
     
-    # append for later plotting
-    all_zmasked.append(z_smooth)
-
 
 # now do median (for when we are looking at all subs)
 all_zmasked_median = np.nanmedian(np.array(all_zmasked), axis = 0)
