@@ -72,10 +72,8 @@ else:
 hemi = ['hemi-L','hemi-R']
 
 
-# variables to store median values
-xx_median = []
-yy_median = []
-rsq_median = []
+# to use later in flatmaps
+estimates_dict_smooth = {'rsq': [], 'x': [], 'y': []}
 
 for i,s in enumerate(sj): # for each subject (if all)
 
@@ -97,59 +95,56 @@ for i,s in enumerate(sj): # for each subject (if all)
     print('masking estimates')
     masked_est = mask_estimates(estimates, s, params, ROI = 'None', fit_model = fit_model)
 
-    # append mask estimates
-    xx_median.append(masked_est['x'])
-    yy_median.append(masked_est['y'])
-    rsq_median.append(masked_est['rsq'])
+    # save some estimates in dict
+    estimates_dict = {'rsq': masked_est['rsq'],
+                      'x': masked_est['x'],
+                      'y': masked_est['y']}
     
-# now do median (for when we are looking at all subs)
-xx_median = np.nanmedian(np.array(xx_median), axis = 0)
-yy_median = np.nanmedian(np.array(yy_median), axis = 0)
-rsq_median = np.nanmedian(np.array(rsq_median), axis = 0)
+    ## now smooth estimates and save
+    # now smooth estimates and save
+    # path to save compute estimates
+    out_estimates_dir = os.path.join(deriv_pth,'estimates','prf','sub-{sj}'.format(sj = s))
+    if not os.path.exists(out_estimates_dir):
+        os.makedirs(out_estimates_dir) 
 
-# and save in dict
-estimates_dict = {'x': xx_median,
-                  'y': yy_median,
-                  'rsq': rsq_median}
+    # get path to post_fmriprep files, for header info 
+    post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.format(sj = s), 'median')
+    post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension['prf'])]
+    post_proc_gii.sort()
 
+    ## smooth for flatmaps
+    for _,est in enumerate(estimates_dict.keys()):
 
-# now smooth estimates and save
-# path to save compute estimates
-out_estimates_dir = os.path.join(deriv_pth,'estimates','prf','sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)))
-if not os.path.exists(out_estimates_dir):
-    os.makedirs(out_estimates_dir) 
+        smooth_file = os.path.split(post_proc_gii[0])[-1].replace('hemi-L','hemi-both').replace('.func.gii','_%s_smooth%d.npy'%(est,params['processing']['smooth_fwhm']))
+        smooth_file = os.path.join(out_estimates_dir,smooth_file)
 
-# get path to post_fmriprep files, for header info 
-post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.format(sj = sj[0]), 'median')
-post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension['prf'])]
-post_proc_gii.sort()
+        if os.path.isfile(smooth_file): # if smooth file exists
+            print('loading %s'%smooth_file)
+            estimates_dict[est] = np.load(smooth_file) # load                      
 
+        else: # smooth array
+                                   
+            estimates_dict[est] = smooth_nparray(estimates_dict[est], 
+                                                   post_proc_gii, 
+                                                   out_estimates_dir, 
+                                                   '_%s'%est, 
+                                                   sub_space = params['processing']['space'], 
+                                                   n_TR = params['plotting']['prf']['n_TR'], 
+                                                   smooth_fwhm = params['processing']['smooth_fwhm'],
+                                                   sub_ID = s)
 
-estimate_type = ['x','y','rsq']
+        # append smooth estimates
+        estimates_dict_smooth[est].append(estimates_dict[est])
 
-for _,est in enumerate(estimate_type):
+ 
+# now do median estimates (for when we are looking at all subs)
 
-    smooth_file = os.path.split(post_proc_gii[0])[-1].replace('hemi-L','hemi-both').replace('.func.gii','_%s_smooth%d.npy'%(est,params['processing']['smooth_fwhm']))
-    smooth_file = os.path.join(out_estimates_dir,smooth_file.replace('sub-{sj}'.format(sj = sj[0]),'sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2))))
+xx_median = np.nanmedian(np.array(estimates_dict_smooth['x']), axis = 0)
+yy_median = np.nanmedian(np.array(estimates_dict_smooth['y']), axis = 0)
+rsq_median = np.nanmedian(np.array(estimates_dict_smooth['rsq']), axis = 0)
 
-    if os.path.isfile(smooth_file): # if smooth file exists
-        print('loading %s'%smooth_file)
-        estimates_dict[est] = np.load(smooth_file) # load                      
-
-    else: # smooth array
-                               
-        estimates_dict[est] = smooth_nparray(estimates_dict[est], 
-                                               post_proc_gii, 
-                                               out_estimates_dir, 
-                                               '_%s'%est, 
-                                               sub_space = params['processing']['space'], 
-                                               n_TR = params['plotting']['prf']['n_TR'], 
-                                               smooth_fwhm = params['processing']['smooth_fwhm'],
-                                               sub_ID = str(sys.argv[1]).zfill(2))
-
-
-# compute polar angle
-complex_location = estimates_dict['x'] + estimates_dict['y'] * 1j
+# compute eccentricity
+complex_location = xx_median + yy_median * 1j
 masked_polar_angle = np.angle(complex_location)
 
 
@@ -168,10 +163,10 @@ masked_polar_ang_norm = (masked_polar_angle + np.pi) / (np.pi * 2.0)
 # value bolean (if I don't give it an rsq threshold then it's always 1)
 
 hsv_angle = []
-hsv_angle = np.ones((len(estimates_dict['rsq']), 3))
+hsv_angle = np.ones((len(rsq_median), 3))
 hsv_angle[:, 0] = masked_polar_angle.copy()
 #hsv_angle[:, 1] = np.clip(estimates_dict['rsq'] / np.nanmax(estimates_dict['rsq']) * 3, 0, 1)
-hsv_angle[:, 2] = estimates_dict['rsq'] > rsq_threshold #np.clip(estimates_dict['rsq'] / np.nanmax(estimates_dict['rsq']) * 3, 0, 1)
+hsv_angle[:, 2] = rsq_median > rsq_threshold #np.clip(estimates_dict['rsq'] / np.nanmax(estimates_dict['rsq']) * 3, 0, 1)
 
 
 # get mid vertex index (diving hemispheres)
@@ -202,7 +197,7 @@ alpha_angle = hsv_angle[:, 2]
 
 images['angle_half_hemi'] = cortex.VertexRGB(rgb_angle[:, 0], rgb_angle[:, 1], rgb_angle[:, 2],
                                            alpha = alpha_angle,
-                                           subject = 'fsaverage_meridians')
+                                           subject = 'fsaverage')
 #cortex.quickshow(images['angle_half_hemi'],with_curvature=True,with_sulci=True,with_colorbar=False)
 
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_rsq-%0.2f_type-polar_angle_half_colorwheel.svg' %rsq_threshold)
@@ -234,7 +229,7 @@ _ = cortex.quickflat.make_figure(images['angle_half_hemi'],
                                  with_roi=False,
                                  with_colorbar=False,
                                  cutout=cutout_name,height=2048)
-filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-PA_bins.svg')
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-PA.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['angle_half_hemi'], recache=False,with_colorbar=False,
                               cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
