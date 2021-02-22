@@ -116,7 +116,7 @@ prf_dm = prf_dm[:,:,params['processing']['crop_pRF_TR']:]
 
 # define model params
 TR = params['general']['TR']
-hrf = utilities.spm_hrf(0,TR)
+hrf = spm_hrf(0,TR)
 
 fit_model = params['fitting']['prf']['fit_model']
 
@@ -209,7 +209,7 @@ for idx,roi in enumerate(ROIs):
 
     new_data = data[roi_verts[roi]] # data from ROI
 
-    new_index =np.where(new_rsq==np.nanmax(new_rsq))[0][0]# index for max rsq within ROI
+    new_index = np.where(new_rsq==np.nanmax(new_rsq))[0][0]# index for max rsq within ROI
 
     timeseries = new_data[new_index]
 

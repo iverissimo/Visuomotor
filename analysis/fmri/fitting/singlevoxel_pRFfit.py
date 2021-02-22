@@ -140,7 +140,7 @@ prf_dm = prf_dm[:,:,params['processing']['crop_pRF_TR']:]
 
 # define model params
 TR = params['general']['TR']
-hrf = utilities.spm_hrf(0,TR)
+hrf = spm_hrf(0,TR)
 
 # times where bar is on screen [1st on, last on, 1st on, last on, etc] 
 bar_onset = (np.array([14,22,25,41,55,71,74,82])-params['processing']['crop_pRF_TR'])*TR
@@ -159,6 +159,7 @@ gg = Iso2DGaussianGridder(stimulus = prf_stim,
                           window_length = params['processing']['sg_filt_window_length'],
                           polyorder = params['processing']['sg_filt_polyorder'],
                           highpass = True,
+                          add_mean = True,
                           task_lengths = np.array([prf_dm.shape[-1]]))
 
 # and css gridder
@@ -168,6 +169,7 @@ gg_css = CSS_Iso2DGaussianGridder(stimulus = prf_stim,
                                   window_length = params['processing']['sg_filt_window_length'],
                                   polyorder = params['processing']['sg_filt_polyorder'],
                                   highpass = True,
+                                  add_mean = True,
                                   task_lengths = np.array([prf_dm.shape[-1]]))
 
 
