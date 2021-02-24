@@ -78,6 +78,12 @@ processing:
                     'rot_x',
                     'rot_z']
 
+eyetracking:
+
+  HP_pupil_f: 0.01
+  LP_pupil_f: 6.0
+  sampling_freq": 1000
+
 plotting:
 
   prf:
