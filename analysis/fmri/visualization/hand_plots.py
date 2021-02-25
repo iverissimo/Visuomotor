@@ -71,16 +71,13 @@ if sj == 'median':
 else:
     sj = [sj]
 
+    
+all_RL_zmasked = {'lhand': [],'rhand': []}
+all_COM = {'lhand': [],'rhand': []}
 
 for i,s in enumerate(sj): # for each subject (if all)
-    
-    all_RL_zmasked = {'lhand': [],'rhand': []}
-    all_COM = {'lhand': [],'rhand': []}
-    
-    fits_pth = os.path.join(deriv_pth,'soma_fit','sub-{sj}'.format(sj=s)) # path to soma fits of each sub
 
-    # load z-score localizer area, for both hand movements
-    z_masked = np.load(os.path.join(fits_pth,'zscore_thresh-%.2f_upper_limb_vs_all_contrast.npy' %(z_threshold)), allow_pickle=True)
+    fits_pth = os.path.join(deriv_pth,'soma_fit','sub-{sj}'.format(sj=s)) # path to soma fits of each sub
 
     # load z-score localizer area, for Right vs Left movements
     z_RL_masked = np.load(os.path.join(fits_pth,'glm_stats_RvsL-hand_contrast_zscore_thresh-%.2f.npz' %(z_threshold)), allow_pickle=True)
@@ -137,7 +134,7 @@ for i,s in enumerate(sj): # for each subject (if all)
 
         # choose side to thresh depending on hand (duw to contrast used)
         side_str = 'above' if hnd == 'rhand' else 'below'
-        z_hand_masked = mask_arr(z_RL_masked.copy(), threshold = z_threshold, side = side_str)
+        z_hand_masked = mask_arr(z_RL_masked.copy(), threshold = 0, side = side_str)
 
         # set regressor names for left and right hand
         regressors_H = [x for _,x in enumerate(regressors) if hnd in x]
@@ -217,6 +214,16 @@ for i,s in enumerate(sj): # for each subject (if all)
         all_COM[hnd].append(allparts_COM)
 
 
+# load RSQ to use as alpha channel for figures
+rsq_dir = os.path.join(deriv_pth,'estimates','soma','sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)))
+rsq_path = [os.path.join(rsq_dir,x) for _,x in enumerate(os.listdir(rsq_dir)) if x.endswith('_rsq_smooth%d.npy'%params['processing']['smooth_fwhm'])][0]
+
+# load
+rsq = np.load(rsq_path) 
+# normalize the distribution, for better visualization
+rsq_norm = normalize(np.clip(rsq,.2,.6)) 
+
+
 # now do median (for when we are looking at all subs)
 # and plot
 
@@ -225,25 +232,40 @@ z_RH_median = np.nanmedian(np.array(all_RL_zmasked['rhand']), axis = 0)
 COM_RH_median = np.nanmedian(np.array(all_COM['rhand']), axis = 0)
     
 # need to mask again because smoothing removes nans
-z_RH_median = mask_arr(z_RH_median, threshold = z_threshold, side = 'above')
+z_RH_median = mask_arr(z_RH_median, threshold = 0, side = 'above')
 # ignore smoothed nan voxels
-COM_RH_median[np.isnan(z_RH_median)] = np.nan    
-    
+COM_RH_median[np.isnan(z_RH_median)] = np.nan  
 
-# vertex for face vs all others
-images['v_RHand'] = cortex.Vertex(z_RH_median, params['processing']['space'],
-                           vmin=0, vmax=7,
-                           cmap='Reds')
+# RSQ for RH
+rsq_RH = rsq_norm.copy()
+rsq_RH[np.isnan(z_RH_median)] = 0
+    
+# create costume colormp Reds
+n_bins = 256
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Reds',bins = n_bins, invert_alpha = False))[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
+# vertex for Rhand
+images['v_RHand'] = cortex.Vertex2D(z_RH_median,rsq_RH, 
+                                        subject = params['processing']['space'],
+                                        vmin=0, vmax=5,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
 
 cortex.quickshow(images['v_RHand'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-Rhand.svg'%z_threshold)
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_RHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
+# create costume colormp rainbow_r
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, invert_alpha = False))[-1])[0]
+print('created costum colormap %s'%col2D_name)
 
-images['v_Rfingers'] = cortex.Vertex(COM_RH_median, params['processing']['space'],
-                           vmin=0, vmax=4,
-                           cmap='rainbow_r')#costum colormap added to database
+images['v_Rfingers'] = cortex.Vertex2D(COM_RH_median,rsq_RH, 
+                                        subject = params['processing']['space'],
+                                        vmin=0, vmax=4,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
 
 cortex.quickshow(images['v_Rfingers'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-RHfingers.svg' %(z_threshold))
@@ -256,15 +278,24 @@ z_LH_median = np.nanmedian(np.array(all_RL_zmasked['lhand']), axis = 0)
 COM_LH_median = np.nanmedian(np.array(all_COM['lhand']), axis = 0)
 
 # need to mask again because smoothing removes nans
-z_LH_median = mask_arr(z_LH_median, threshold = z_threshold, side = 'below')
+z_LH_median = mask_arr(z_LH_median, threshold = 0, side = 'below')
 # ignore smoothed nan voxels
 COM_LH_median[np.isnan(z_LH_median)] = np.nan
 
+# RSQ for LH
+rsq_LH = rsq_norm.copy()
+rsq_LH[np.isnan(z_LH_median)] = 0
 
-# vertex for face vs all others
-images['v_LHand'] = cortex.Vertex(z_LH_median, params['processing']['space'],
-                           vmin=-7, vmax=0,
-                           cmap='Blues_r')
+# create costume colormp Blues_r
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Blues_r', bins = n_bins, invert_alpha = False))[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
+# vertex for Rhand
+images['v_LHand'] = cortex.Vertex2D(z_LH_median,rsq_LH, 
+                                        subject = params['processing']['space'],
+                                        vmin=-5, vmax=0,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
 
 cortex.quickshow(images['v_LHand'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-Lhand.svg'%z_threshold)
@@ -272,9 +303,16 @@ print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_LHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
 
-images['v_Lfingers'] = cortex.Vertex(COM_LH_median, params['processing']['space'],
-                           vmin=0, vmax=4,
-                           cmap = 'rainbow_r')#costum colormap added to database
+# create costume colormp rainbow_r
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, invert_alpha = False))[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
+images['v_Lfingers'] = cortex.Vertex2D(COM_LH_median,rsq_LH, 
+                                        subject = params['processing']['space'],
+                                        vmin=0, vmax=4,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
+
 
 cortex.quickshow(images['v_Lfingers'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-LHfingers.svg' %(z_threshold))

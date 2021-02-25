@@ -28,12 +28,14 @@ import math
 import cortex
 
 import matplotlib.pyplot as plt
+from matplotlib import cm
 
 from scipy.stats import pearsonr, t, norm
 from scipy import ndimage
 
 from scipy.integrate import trapz
 from scipy import stats
+from scipy import misc
 
 
 def median_gii(files,outdir):
@@ -1240,3 +1242,51 @@ def spm_hrf(delay, TR):
     # hrf = hrf([0:(p(7)/RT)]*fMRI_T + 1);
     hrf /= trapz(hrf)
     return hrf
+
+
+def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False):
+    """
+    add alpha channel to colormap,
+    and save to pycortex filestore
+    """
+    
+    # get colormap
+    cmap = cm.get_cmap(colormap)
+    
+    # convert into array
+    cmap_array = cmap(range(256))
+    
+    # make alpha array
+    if invert_alpha == True: # in case we want to invert alpha (y from 1 to 0 instead pf 0 to 1)
+        _, alpha = np.meshgrid(np.linspace(0, 1, 256, endpoint=False), 1-np.linspace(0, 1, 256))
+    else:
+        _, alpha = np.meshgrid(np.linspace(0, 1, 256, endpoint=False), np.linspace(0, 1, 256, endpoint=False))
+    
+    # reshape array for map
+    new_map = []
+    for i in range(cmap_array.shape[-1]):
+        new_map.append(np.tile(cmap_array[...,i],(256,1)))
+
+    new_map = np.moveaxis(np.array(new_map), 0, -1)
+
+    # add alpha channel
+    new_map[...,-1] = alpha
+    
+    fig = plt.figure(figsize=(1,1))
+    ax = fig.add_axes([0,0,1,1])
+    # plot 
+    plt.imshow(new_map,
+    extent = (0,1,0,1),
+    origin = 'lower')
+    ax.axis('off')
+
+    rgb_fn = os.path.join(os.path.split(cortex.database.default_filestore)[
+                          0], 'colormaps', colormap+'_alpha_bins_%d.png'%bins)
+
+    #misc.imsave(rgb_fn, new_map)
+    plt.savefig(rgb_fn, dpi = 200,transparent=True)
+       
+    return rgb_fn  
+
+
+
