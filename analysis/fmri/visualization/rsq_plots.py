@@ -83,164 +83,165 @@ for _,val in enumerate(ROIs):
     roi_verts[val] = cortex.get_roi_verts(params['processing']['space'],val)[val]
 
 
-for idx,rois_ks in enumerate(ROIs+['None']):
+for i,s in enumerate(sj): # for each subject (if all)
 
-    for i,s in enumerate(sj): # for each subject (if all)
+    fits_pth = os.path.join(deriv_pth,'pRF_fit','sub-{sj}'.format(sj = s),fit_model) # path to pRF fits
 
-        fits_pth = os.path.join(deriv_pth,'pRF_fit','sub-{sj}'.format(sj = s),fit_model) # path to pRF fits
+    # absolute path to estimates (combined chunks)
+    estimates_combi = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(fits_pth)) if x.endswith(estimate_prf_ext) and 'chunks' not in x]
 
-        # absolute path to estimates (combined chunks)
-        estimates_combi = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(fits_pth)) if x.endswith(estimate_prf_ext) and 'chunks' not in x]
+    # load estimates
+    estimates = []
+
+    for _,h in enumerate(hemi): # each hemifield
+
+        est = [x for _,x in enumerate(estimates_combi) if h in x][0]
+        print('loading %s'%est)
+        estimates.append(np.load(est)) #save both hemisphere estimates in same array
+
+    #loop for all ROIs
+    for idx,rois_ks in enumerate(ROIs+['None']):
         
-        # load estimates
-        estimates = []
-
-        for _,h in enumerate(hemi): # each hemifield
-
-            est = [x for _,x in enumerate(estimates_combi) if h in x][0]
-            print('loading %s'%est)
-            estimates.append(np.load(est)) #save both hemisphere estimates in same array
-            
         # mask estimates
-        print('masking estimates')
+        print('masking estimates for ROI %s'%rois_ks)
         masked_est = mask_estimates(estimates, s, params, ROI = rois_ks, fit_model = fit_model)
 
         new_rsq = masked_est['rsq']
-        
+
         # save values in DF
         if idx == 0 and i == 0:
-            df_rsq = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s})
+            df_rsq_visual = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s})
         else:
-            df_rsq = df_rsq.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s}))
+            df_rsq_visual = df_rsq_visual.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s}))
 
 
-
-# do median (for when we are looking at all subs)
-for idx,rois_ks in enumerate(ROIs+['None']):   
-    rsq_4plot = []
-
-    for i,s in enumerate(sj): # for each subject (if all)
-
-        rsq_4plot.append(list(df_rsq.loc[(df_rsq['roi'] == rois_ks)&(df_rsq['sub'] == s)]['rsq'][0]))
-
-    new_rsq4plot = np.nanmedian(np.array(rsq_4plot), axis = 0)
-    if rois_ks == 'None':
-        rsq_visual = new_rsq4plot.copy()
-    new_rsq4plot = new_rsq4plot[new_rsq4plot >= rsq_threshold] # threshold it
+# ravel for violin plot 
+# (we want to include all voxels of all subs to see distribution)
+for idx,rois_ks in enumerate(ROIs): 
+    
+    rsq_4plot = np.concatenate(list(df_rsq_visual.loc[(df_rsq_visual['roi'] == rois_ks)]['rsq'][0])).ravel()
+    # threshold it
+    rsq_4plot = rsq_4plot[rsq_4plot >= rsq_threshold] 
     
     # save values in DF
     if idx == 0:
-        df_rsq_median = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq4plot]})
+        df_rsq_4plot = pd.DataFrame({'roi': rois_ks,'rsq': [rsq_4plot]})
     else:
-        df_rsq_median = df_rsq_median.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq4plot]}))
+        df_rsq_4plot = df_rsq_4plot.append(pd.DataFrame({'roi': rois_ks,'rsq': [rsq_4plot]}))
 
 
 # plot violin of distribution of RSQ
 fig = plt.figure(num=None, figsize=(15,7.5), dpi=100, facecolor='w', edgecolor='k')
 
-df_visual_plot = df_rsq_median[df_rsq_median['roi'].isin(ROIs)]
-df_visual_plot = df_visual_plot.explode('rsq')
+df_visual_plot = df_rsq_4plot.explode('rsq')
 df_visual_plot['rsq'] = df_visual_plot['rsq'].astype('float')
 
-v1 = sns.violinplot(data = df_visual_plot, x = 'roi', y = 'rsq',cut=0, inner='box', palette='Set3',linewidth=1.5)
+v1 = sns.violinplot(data = df_visual_plot, x = 'roi', y = 'rsq', 
+                    cut=0, inner='box', palette='Set3',linewidth=1.8)
 
 v1.set(xlabel=None)
 v1.set(ylabel=None)
-#plt.margins(y=0.025)
+plt.margins(y=0.025)
 #sns.swarmplot(x='ecc', y='cs', data=crwd_df4plot,color=".25",alpha=0.5)
-plt.xticks(fontsize = 15)
-plt.yticks(fontsize = 15)
+plt.xticks(fontsize = 18)
+plt.yticks(fontsize = 18)
 
-plt.xlabel('ROI',fontsize = 20,labelpad=16)
-plt.ylabel('RSQ',fontsize = 20,labelpad=16)
+plt.xlabel('ROI',fontsize = 20,labelpad=18)
+plt.ylabel('RSQ',fontsize = 20,labelpad=18)
 plt.ylim(0,1)
 
 fig.savefig(os.path.join(figures_pth,'rsq_visual_violinplot.svg'), dpi=100)
 
 
-#### motor task ####
+## now do same for motor task
 
 ROIs = list(params['fitting']['soma']['all_contrasts'].keys()) # list of key names (of different body regions)
 
-for idx,rois_ks in enumerate(['None']+ROIs):
+for i,s in enumerate(sj): # for each subject (if all)
 
-    for i,s in enumerate(sj): # for each subject (if all)
-        
-        fits_pth = os.path.join(deriv_pth,'soma_fit','sub-{sj}'.format(sj = s)) # path to pRF fits
-        
+    fits_pth = os.path.join(deriv_pth,'soma_fit','sub-{sj}'.format(sj = s)) # path to pRF fits
+    
+    for idx,rois_ks in enumerate(['None']+ROIs):
+
         if rois_ks == 'None': # save rsq of all vertices
-            
+
             estimates_filename = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(fits_pth)) if 'hemi-both' in x and x.endswith(estimate_soma_ext)][0]
             estimates = np.load(estimates_filename,allow_pickle = True)
             all_rsq = estimates['r2']
             new_rsq = all_rsq.copy()
-        
+
         else:
             zmask_filename = os.path.join(fits_pth,'zscore_thresh-%.2f_%s_vs_all_contrast.npy' %(z_threshold,rois_ks))
             zmask = np.load(zmask_filename, allow_pickle = True)
-            
+
             # mask rsq - only significant voxels for region
             new_rsq = all_rsq.copy()
             new_rsq[np.isnan(zmask)] = np.nan
-            
+
         # save values in DF
         if idx == 0 and i == 0:
-            df_rsq = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s})
+            df_rsq_soma = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s})
         else:
-            df_rsq = df_rsq.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s}))
+            df_rsq_soma = df_rsq_soma.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s}))
 
 
-# do median (for when we are looking at all subs)
-for idx,rois_ks in enumerate(ROIs+['None']):   
+# ravel for violin plot 
+# (we want to include all voxels of all subs to see distribution)
+for idx,rois_ks in enumerate(ROIs): 
     
-    rsq_4plot = []
-
-    for i,s in enumerate(sj): # for each subject (if all)
-
-        rsq_4plot.append(list(df_rsq.loc[(df_rsq['roi'] == rois_ks)&(df_rsq['sub'] == s)]['rsq'][0]))
-
-    new_rsq4plot = np.nanmedian(np.array(rsq_4plot), axis = 0)
+    rsq_4plot = np.concatenate(list(df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0])).ravel()
+    # threshold it
+    rsq_4plot = rsq_4plot[rsq_4plot >= rsq_threshold] 
     
-    if rois_ks == 'None':
-        rsq_soma = new_rsq4plot.copy()
-            
     # save values in DF
     if idx == 0:
-        df_rsq_median = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq4plot]})
+        df_rsq_4plot = pd.DataFrame({'roi': rois_ks,'rsq': [rsq_4plot]})
     else:
-        df_rsq_median = df_rsq_median.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq4plot]}))
+        df_rsq_4plot = df_rsq_4plot.append(pd.DataFrame({'roi': rois_ks,'rsq': [rsq_4plot]}))
 
 
 # plot violin of distribution of RSQ
 fig = plt.figure(num=None, figsize=(15,7.5), dpi=100, facecolor='w', edgecolor='k')
 
-df_soma_plot = df_rsq_median[df_rsq_median['roi'].isin(ROIs)]
-df_soma_plot = df_soma_plot.explode('rsq')
+df_soma_plot = df_rsq_4plot.explode('rsq')
 df_soma_plot['rsq'] = df_soma_plot['rsq'].astype('float')
 
-v1 = sns.violinplot(data = df_soma_plot, x = 'roi', y = 'rsq',cut=0, inner='box', palette='Set3',linewidth=1.5)
+v1 = sns.violinplot(data = df_soma_plot, x = 'roi', y = 'rsq',
+                    cut=0, inner='box', palette=['#c77777','#7bb0a0','#7b95b0'],linewidth=1.8)
 
 v1.set(xlabel=None)
 v1.set(ylabel=None)
 v1.set_xticklabels(['Face','Hands','Feet'])
-
-#plt.margins(y=0.025)
+plt.margins(y=0.025)
 #sns.swarmplot(x='ecc', y='cs', data=crwd_df4plot,color=".25",alpha=0.5)
-plt.xticks(fontsize = 15)
-plt.yticks(fontsize = 15)
+plt.xticks(fontsize = 18)
+plt.yticks(fontsize = 18)
 
-plt.xlabel('ROI',fontsize = 20,labelpad=16)
-plt.ylabel('RSQ',fontsize = 20,labelpad=16)
+plt.xlabel('ROI',fontsize = 20,labelpad=18)
+plt.ylabel('RSQ',fontsize = 20,labelpad=18)
 plt.ylim(0,1)
+
 fig.savefig(os.path.join(figures_pth,'rsq_soma_violinplot.svg'), dpi=100)
 
 
-# smooth rsq for, to plot in flatmap
-# visual already masked, not thresholded
+# now smooth RSQ, to plot in flatmap
 
 tasks = params['general']['tasks']
 
+rsq_median = {'prf': [],
+              'soma': []}
+
+df_rsq_median = {'prf': df_rsq_visual.loc[(df_rsq_visual['roi'] == 'None')],
+              'soma': df_rsq_soma.loc[(df_rsq_soma['roi'] == 'None')]}
+
 for _,tsk in enumerate(tasks):
+
+    for i,s in enumerate(sj): # for each subject (if all)
+        
+        rsq_median[tsk].append(list(df_rsq_median[tsk].loc[(df_rsq_median[tsk]['sub'] == s)]['rsq'][0])) 
+    
+    # do median (for when we are looking at all subs)   
+    rsq_median[tsk] = np.nanmedian(np.array(rsq_median[tsk]), axis = 0)
     
     # path to save compute estimates
     out_estimates_dir = os.path.join(deriv_pth,'estimates',tsk,'sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)))
@@ -251,41 +252,32 @@ for _,tsk in enumerate(tasks):
     post_proc_gii_pth = os.path.join(deriv_pth,'post_fmriprep', tsk,'sub-{sj}'.format(sj = sj[0]), 'median')
     post_proc_gii = [os.path.join(post_proc_gii_pth,x) for _,x in enumerate(os.listdir(post_proc_gii_pth)) if params['processing']['space'] in x and x.endswith(file_extension[tsk])]
     post_proc_gii.sort()
-    
+
     smooth_file = os.path.split(post_proc_gii[0])[-1].replace('hemi-L','hemi-both').replace('.func.gii','_rsq_smooth%d.npy'%params['processing']['smooth_fwhm'])
-    smooth_file = os.path.join(out_estimates_dir,smooth_file.replace('sub-{sj}'.format(sj = sj[0]),'sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2))))
-    
+    smooth_file = os.path.join(out_estimates_dir,smooth_file).replace('sub-{sj}'.format(sj = sj[0]),'sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)))
+
     if os.path.isfile(smooth_file): # if smooth file exists
         print('loading %s'%smooth_file)
-        if tsk == 'prf':
-            rsq_visual_smooth = np.load(smooth_file) # load
-        elif tsk == 'soma': 
-            rsq_soma_smooth = np.load(smooth_file) # load
-        
+        rsq_smooth = np.load(smooth_file) # load
+
     else: # smooth rsq
-        if tsk == 'prf':
-            rsq_visual_smooth = smooth_nparray(rsq_visual, 
-                                               post_proc_gii, 
-                                               out_estimates_dir, 
-                                               '_rsq', 
-                                               sub_space = params['processing']['space'], 
-                                               n_TR = params['plotting'][tsk]['n_TR'], 
-                                               smooth_fwhm = params['processing']['smooth_fwhm'],
-                                               sub_ID = str(sys.argv[1]).zfill(2))
-        elif tsk == 'soma':
-            rsq_soma_smooth = smooth_nparray(rsq_soma, 
-                                               post_proc_gii, 
-                                               out_estimates_dir, 
-                                               '_rsq', 
-                                               sub_space = params['processing']['space'], 
-                                               n_TR = params['plotting'][tsk]['n_TR'], 
-                                               smooth_fwhm = params['processing']['smooth_fwhm'],
-                                               sub_ID = str(sys.argv[1]).zfill(2))
+
+        rsq_smooth = smooth_nparray(rsq_median[tsk], 
+                                   post_proc_gii, 
+                                   out_estimates_dir, 
+                                   '_rsq', 
+                                   sub_space = params['processing']['space'], 
+                                   n_TR = params['plotting'][tsk]['n_TR'], 
+                                   smooth_fwhm = params['processing']['smooth_fwhm'],
+                                   sub_ID = str(sys.argv[1]).zfill(2))
+
+    rsq_median[tsk] = rsq_smooth
 
 
 # do this to replace nans with 0s, so flatmaps look nicer
-rsq_visual_smooth = np.array([x if np.isnan(x)==False else 0 for _,x in enumerate(rsq_visual_smooth)])
-rsq_soma_smooth = np.array([x if np.isnan(x)==False else 0 for _,x in enumerate(rsq_soma_smooth)])
+rsq_visual_smooth = np.array([x if np.isnan(x)==False else 0 for _,x in enumerate(rsq_median['prf'])])
+rsq_soma_smooth = np.array([x if np.isnan(x)==False else 0 for _,x in enumerate(rsq_median['soma'])])
+
 
 # normalize RSQ 
 rsq_visual_smooth_norm = normalize(rsq_visual_smooth) 
@@ -342,12 +334,12 @@ _ = cortex.quickflat.make_figure(images['rsq_combined'],
                                  with_sulci=True,
                                  with_roi=False,
                                  with_colorbar=False,
-                                 cutout=cutout_name)#,height=2048)
+                                 cutout=cutout_name,height=2048)
 
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-rsquared-normalized_combined_bins-%d.svg'%n_bins)
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['rsq_combined'], recache=True,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False)#,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
 
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
@@ -357,15 +349,28 @@ _ = cortex.quickflat.make_figure(images['rsq_combined'],
                                  with_sulci=True,
                                  with_roi=False,
                                  with_colorbar=False,
-                                 cutout=cutout_name)#,height=2048)
+                                 cutout=cutout_name,height=2048)
 
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-rsquared-normalized_combined_bins-%d.svg'%n_bins)
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['rsq_combined'], recache=True,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False)#,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
 
 
+# save inflated 3D screenshots 
+figures_pth = os.path.join(figures_pth,'3d_views_screenshots')
+if not os.path.exists(figures_pth):  # check if path exists
+        os.makedirs(figures_pth)
 
+cortex.export.save_3d_views(images['rsq_combined'], 
+             base_name=os.path.join(figures_pth,'sub-%s'%(str(sys.argv[1]).zfill(2))), 
+             list_angles=['lateral_pivot', 'medial_pivot', 'left', 'right', 'top', 'bottom',
+                         'left'],
+                  list_surfaces=['inflated', 'inflated', 'inflated', 'inflated','inflated','inflated',
+                                'flatmap'],
+                  viewer_params=dict(labels_visible=[],
+                                     overlays_visible=['rois','sulci']),
+                  size=(1024 * 4, 768 * 4), trim=True, sleep=60)
 
 
 
