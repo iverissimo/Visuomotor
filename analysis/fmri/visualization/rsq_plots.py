@@ -296,22 +296,28 @@ images = {}
 
 images['rsq_visual_norm'] = cortex.Vertex(rsq_visual_smooth_norm, 
                                           params['processing']['space'],
-                                           vmin = 0, vmax = .7,
+                                           vmin = 0.125, vmax = 0.2,
                                            cmap='Reds')
 #cortex.quickshow(images['rsq_visual_norm'],with_curvature=True,with_sulci=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_visual.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['rsq_visual_norm'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
+##### add flatmap to subject overlay
+#cortex.utils.add_roi(images['rsq_visual_norm'], name='sub-median_rsq_visual_norm', open_inkscape=False)
+
 
 images['rsq_soma_norm'] = cortex.Vertex(rsq_soma_smooth_norm, 
                                           params['processing']['space'],
-                                           vmin = 0, vmax = .7,
+                                           vmin = 0.2, vmax = .6,
                                            cmap='Blues')
 #cortex.quickshow(images['rsq_soma_norm'],with_curvature=True,with_sulci=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_soma.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['rsq_soma_norm'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+##### add flatmap to subject overlay
+#cortex.utils.add_roi(images['rsq_soma_norm'], name='sub-median_rsq_soma_norm', open_inkscape=False)
 
 
 images['rsq_combined'] = cortex.Vertex2D(rsq_visual_smooth_norm,rsq_soma_smooth_norm, 
