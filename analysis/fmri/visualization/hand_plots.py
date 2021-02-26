@@ -72,7 +72,8 @@ else:
     sj = [sj]
 
     
-all_RL_zmasked = {'lhand': [],'rhand': []}
+all_RL_zmasked_smooth = {'lhand': [],'rhand': []}
+all_RL_zmasked = {'lhand': [],'rhand': []} # save non smoothed too
 all_COM = {'lhand': [],'rhand': []}
 
 for i,s in enumerate(sj): # for each subject (if all)
@@ -200,7 +201,8 @@ for i,s in enumerate(sj): # for each subject (if all)
 
 
                 # append for later plotting
-                all_RL_zmasked[hnd].append(z_smooth) # save for later
+                all_RL_zmasked_smooth[hnd].append(z_smooth) # save for later
+                all_RL_zmasked[hnd].append(z_hand_masked)
 
 
             betas_reg.append(betas_smooth)
@@ -228,13 +230,15 @@ rsq_norm = normalize(np.clip(rsq,.2,.6))
 # and plot
 
 # RIGHT hand
+z_RH_median_smooth = np.nanmedian(np.array(all_RL_zmasked_smooth['rhand']), axis = 0)
 z_RH_median = np.nanmedian(np.array(all_RL_zmasked['rhand']), axis = 0)
+
 COM_RH_median = np.nanmedian(np.array(all_COM['rhand']), axis = 0)
     
 # need to mask again because smoothing removes nans
-z_RH_median = mask_arr(z_RH_median, threshold = 0, side = 'above')
+z_RH_median_smooth = mask_arr(z_RH_median_smooth, threshold = 0, side = 'above')
 # ignore smoothed nan voxels
-COM_RH_median[np.isnan(z_RH_median)] = np.nan  
+COM_RH_median[np.isnan(z_RH_median_smooth)] = np.nan  
 
 # RSQ for RH
 rsq_RH = rsq_norm.copy()
@@ -242,11 +246,11 @@ rsq_RH[np.isnan(z_RH_median)] = 0
     
 # create costume colormp Reds
 n_bins = 256
-col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Reds',bins = n_bins, invert_alpha = False))[-1])[0]
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Reds',bins = n_bins, cmap_name = 'Reds'))[-1])[0]
 print('created costum colormap %s'%col2D_name)
 
 # vertex for Rhand
-images['v_RHand'] = cortex.Vertex2D(z_RH_median,rsq_RH, 
+images['v_RHand'] = cortex.Vertex2D(z_RH_median_smooth,rsq_RH, 
                                         subject = params['processing']['space'],
                                         vmin=0, vmax=5,
                                         vmin2 = 0, vmax2 = 1,
@@ -258,7 +262,7 @@ print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_RHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
 # create costume colormp rainbow_r
-col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, invert_alpha = False))[-1])[0]
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, cmap_name = 'rainbow_r'))[-1])[0]
 print('created costum colormap %s'%col2D_name)
 
 images['v_Rfingers'] = cortex.Vertex2D(COM_RH_median,rsq_RH, 
@@ -272,26 +276,43 @@ filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-RH
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_Rfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
 
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_left'
+_ = cortex.quickflat.make_figure(images['v_Rfingers'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-RH.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['v_Rfingers'], recache=True,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+
 
 # LEFT hand
+z_LH_median_smooth = np.nanmedian(np.array(all_RL_zmasked_smooth['lhand']), axis = 0)
 z_LH_median = np.nanmedian(np.array(all_RL_zmasked['lhand']), axis = 0)
+
 COM_LH_median = np.nanmedian(np.array(all_COM['lhand']), axis = 0)
 
 # need to mask again because smoothing removes nans
-z_LH_median = mask_arr(z_LH_median, threshold = 0, side = 'below')
+z_LH_median_smooth = mask_arr(z_LH_median_smooth, threshold = 0, side = 'below')
 # ignore smoothed nan voxels
-COM_LH_median[np.isnan(z_LH_median)] = np.nan
+COM_LH_median[np.isnan(z_LH_median_smooth)] = np.nan
 
 # RSQ for LH
 rsq_LH = rsq_norm.copy()
 rsq_LH[np.isnan(z_LH_median)] = 0
 
 # create costume colormp Blues_r
-col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Blues_r', bins = n_bins, invert_alpha = False))[-1])[0]
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Blues_r', bins = n_bins, cmap_name = 'Blues_r'))[-1])[0]
 print('created costum colormap %s'%col2D_name)
 
 # vertex for Rhand
-images['v_LHand'] = cortex.Vertex2D(z_LH_median,rsq_LH, 
+images['v_LHand'] = cortex.Vertex2D(z_LH_median_smooth,rsq_LH, 
                                         subject = params['processing']['space'],
                                         vmin=-5, vmax=0,
                                         vmin2 = 0, vmax2 = 1,
@@ -304,7 +325,7 @@ _ = cortex.quickflat.make_png(filename, images['v_LHand'], recache=False,with_co
 
 
 # create costume colormp rainbow_r
-col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, invert_alpha = False))[-1])[0]
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, cmap_name = 'rainbow_r'))[-1])[0]
 print('created costum colormap %s'%col2D_name)
 
 images['v_Lfingers'] = cortex.Vertex2D(COM_LH_median,rsq_LH, 
@@ -320,7 +341,19 @@ print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_Lfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
 
 
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_right'
+_ = cortex.quickflat.make_figure(images['v_Lfingers'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
 
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-LH.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['v_Lfingers'], recache=True,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
 
 
 

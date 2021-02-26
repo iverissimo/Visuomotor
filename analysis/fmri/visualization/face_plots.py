@@ -189,7 +189,16 @@ for i,s in enumerate(sj): # for each subject (if all)
     # append for later plotting
     all_COM.append(allparts_COM)
 
-    
+
+# load RSQ to use as alpha channel for figures
+rsq_dir = os.path.join(deriv_pth,'estimates','soma','sub-{sj}'.format(sj = str(sys.argv[1]).zfill(2)))
+rsq_path = [os.path.join(rsq_dir,x) for _,x in enumerate(os.listdir(rsq_dir)) if x.endswith('_rsq_smooth%d.npy'%params['processing']['smooth_fwhm'])][0]
+
+# load
+rsq = np.load(rsq_path) 
+# normalize the distribution, for better visualization
+rsq_norm = normalize(np.clip(rsq,.2,.6)) 
+   
 
 # now do median (for when we are looking at all subs)
 all_zmasked_median = np.nanmedian(np.array(all_zmasked), axis = 0)
@@ -202,10 +211,20 @@ images = {}
 # need to mask again because smoothing removes nans
 all_zmasked_median = mask_arr(all_zmasked_median, threshold = z_threshold, side = 'above')
 
+rsq_norm[np.isnan(all_zmasked_median)] = 0
+
+# create costume colormp Blues
+n_bins = 256
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'Blues',bins = n_bins, cmap_name = 'Blues'))[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
 # vertex for face vs all others
-images['v_face'] = cortex.Vertex(all_zmasked_median, params['processing']['space'],
-                           vmin=0, vmax=7,
-                           cmap='Blues')
+images['v_face'] = cortex.Vertex2D(all_zmasked_median,rsq_norm, 
+                                        subject = params['processing']['space'],
+                                        vmin=0, vmax=5,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
+
 
 #cortex.quickshow(images['v_face'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-face-vs-all.svg'%z_threshold)
@@ -215,15 +234,52 @@ _ = cortex.quickflat.make_png(filename, images['v_face'], recache=False,with_col
 # ignore smoothed nan voxels
 all_COM_median[np.isnan(all_zmasked_median)] = np.nan
 
+# create costume colormp J4
+col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
 # 'eyebrows', 'eyes', 'mouth','tongue', , combined
-images['v_facecombined'] = cortex.Vertex(all_COM_median, 'fsaverage',
-                           vmin=0, vmax=3,
-                           cmap='J4') #costum colormap added to database
+images['v_facecombined'] = cortex.Vertex2D(all_COM_median,rsq_norm, 
+                                        subject = params['processing']['space'],
+                                        vmin=0, vmax=3,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
+
 
 #cortex.quickshow(images['v_facecombined'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-eyebrows-eyes-mouth-tongue.svg' %(z_threshold))
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
+
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_left'
+_ = cortex.quickflat.make_figure(images['v_facecombined'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-face_LH.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=True,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+# Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+cutout_name = 'zoom_roi_right'
+_ = cortex.quickflat.make_figure(images['v_facecombined'],
+                                 with_curvature=True,
+                                 with_sulci=True,
+                                 with_roi=False,
+                                 with_colorbar=False,
+                                 cutout=cutout_name,height=2048)
+
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-face_RH.svg')
+print('saving %s' %filename)
+_ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=True,with_colorbar=False,with_labels=False,
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
 
 
 

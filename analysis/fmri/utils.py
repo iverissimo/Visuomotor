@@ -29,6 +29,7 @@ import cortex
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
+import matplotlib.colors
 
 from scipy.stats import pearsonr, t, norm
 from scipy import ndimage
@@ -1244,14 +1245,40 @@ def spm_hrf(delay, TR):
     return hrf
 
 
-def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False):
-    """
-    add alpha channel to colormap,
+def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False, cmap_name = 'costum'):
+
+    """ add alpha channel to colormap,
     and save to pycortex filestore
+
+    Parameters
+    ----------
+    colormap : str or List/arr
+        if string then has to be a matplolib existent colormap
+        if list/array then contains strings with color names, to create linear segmented cmap
+    bins : int
+        number of bins for colormap
+    invert_alpha : bool
+        if we want to invert direction of alpha channel
+        (y can be from 0 to 1 or 1 to 0)
+    cmap_name : str
+        new cmap filename, final one will have _alpha_#-bins added to it
+
+    Outputs
+    -------
+    rgb_fn : str
+        absolute path to new colormap
     """
     
-    # get colormap
-    cmap = cm.get_cmap(colormap)
+    if isinstance(colormap, str): # if input is string (so existent colormap)
+
+        # get colormap
+        cmap = cm.get_cmap(colormap)
+
+    else: # is list of strings
+        cvals  = np.arange(len(colormap))
+        norm = plt.Normalize(min(cvals),max(cvals))
+        tuples = list(zip(map(norm,cvals), colormap))
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", tuples)
     
     # convert into array
     cmap_array = cmap(range(256))
@@ -1281,7 +1308,7 @@ def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False)
     ax.axis('off')
 
     rgb_fn = os.path.join(os.path.split(cortex.database.default_filestore)[
-                          0], 'colormaps', colormap+'_alpha_bins_%d.png'%bins)
+                          0], 'colormaps', cmap_name+'_alpha_bins_%d.png'%bins)
 
     #misc.imsave(rgb_fn, new_map)
     plt.savefig(rgb_fn, dpi = 200,transparent=True)
