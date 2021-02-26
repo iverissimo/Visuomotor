@@ -89,10 +89,10 @@ glasser = cortex.VertexRGB(np.concatenate((LH_R,RH_R))/255,
                            np.concatenate((LH_G,RH_G))/255, 
                            np.concatenate((LH_B,RH_B))/255,
                            alpha=(255 - np.concatenate((LH_T,RH_T)))/255,
-                           subject='fsaverage_meridians')
+                           subject='fsaverage')
 
 
-cortex.quickshow(glasser,with_curvature=True,with_sulci=True,with_colorbar=False)
+#cortex.quickshow(glasser,with_curvature=True,with_sulci=True,with_colorbar=False)
 
 filename = os.path.join(figures_pth,'glasser_flatmap_space-fsaverage_all_ROI.svg')
 print('saving %s' %filename)
@@ -127,6 +127,24 @@ filename = os.path.join(figures_pth,cutout_name+'_glasser_flatmap_space-fsaverag
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, glasser, recache=False,with_colorbar=False,
                               cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+
+
+# save inflated 3D screenshots 
+figures_pth = os.path.join(figures_pth,'3d_views_screenshots')
+if not os.path.exists(figures_pth):  # check if path exists
+        os.makedirs(figures_pth)
+
+cortex.export.save_3d_views(glasser, 
+                            base_name = os.path.join(figures_pth,'glasser'),
+                            list_angles = ['lateral_pivot', 'medial_pivot', 'left', 'right', 'top', 'bottom',
+                                       'left'],
+                            list_surfaces = ['inflated', 'inflated', 'inflated', 'inflated','inflated','inflated',
+                                          'flatmap'],
+                            viewer_params=dict(labels_visible=[],
+                                               overlays_visible=['rois','sulci']),
+                            size=(1024 * 4, 768 * 4), trim=True, sleep=60)
+
+
 
 
 
