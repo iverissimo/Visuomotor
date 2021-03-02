@@ -131,13 +131,24 @@ for idx,rois_ks in enumerate(ROIs):
 
 
 # plot violin of distribution of RSQ
+
+# Make a dictionary with one specific color per group - similar to fig3 colors
+ROI_pal = {'V1': (0.03137255, 0.11372549, 0.34509804), 'V2': (0.14136101, 0.25623991, 0.60530565),
+           'V3': (0.12026144, 0.50196078, 0.72156863), 'V3AB': (0.25871588, 0.71514033, 0.76807382), 
+           'hV4': (0.59215686, 0.84052288, 0.72418301), 'LO': (0.88207612, 0.9538639 , 0.69785467),
+           'IPS0': (0.99764706, 0.88235294, 0.52862745), 'IPS1': (0.99529412, 0.66901961, 0.2854902), 
+           'IPS2+': (0.83058824, 0.06117647, 0.1254902),
+           'sPCS': (0.88221453, 0.83252595, 0.91109573), 'iPCS': (0.87320261, 0.13071895, 0.47320261)
+         }
+
+
 fig = plt.figure(num=None, figsize=(15,7.5), dpi=100, facecolor='w', edgecolor='k')
 
 df_visual_plot = df_rsq_4plot.explode('rsq')
 df_visual_plot['rsq'] = df_visual_plot['rsq'].astype('float')
 
 v1 = sns.violinplot(data = df_visual_plot, x = 'roi', y = 'rsq', 
-                    cut=0, inner='box', palette='Set3',linewidth=1.8)
+                    cut=0, inner='box', palette = ROI_pal,linewidth=1.8) # palette ='Set3',linewidth=1.8)
 
 v1.set(xlabel=None)
 v1.set(ylabel=None)
@@ -207,7 +218,7 @@ df_soma_plot = df_rsq_4plot.explode('rsq')
 df_soma_plot['rsq'] = df_soma_plot['rsq'].astype('float')
 
 v1 = sns.violinplot(data = df_soma_plot, x = 'roi', y = 'rsq',
-                    cut=0, inner='box', palette=['#c77777','#7bb0a0','#7b95b0'],linewidth=1.8)
+                    cut=0, inner='box', palette=['#2367b0','#23b086','#c72828'],linewidth=1.8)
 
 v1.set(xlabel=None)
 v1.set(ylabel=None)
