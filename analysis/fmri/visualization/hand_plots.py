@@ -256,25 +256,27 @@ images['v_RHand'] = cortex.Vertex2D(z_RH_median_smooth,rsq_RH,
                                         vmin2 = 0, vmax2 = 1,
                                         cmap = col2D_name)
 
-cortex.quickshow(images['v_RHand'],with_curvature=True,with_sulci=True,with_colorbar=True)
+#cortex.quickshow(images['v_RHand'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-Rhand.svg'%z_threshold)
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['v_RHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+_ = cortex.quickflat.make_png(filename, images['v_RHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # create costume colormp rainbow_r
 col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainbow_r',bins = n_bins, cmap_name = 'rainbow_r'))[-1])[0]
 print('created costum colormap %s'%col2D_name)
 
 images['v_Rfingers'] = cortex.Vertex2D(COM_RH_median,rsq_RH, 
-                                        subject = params['processing']['space'],
+                                        subject = params['processing']['space'], #'fsaverage_meridians',
                                         vmin=0, vmax=4,
                                         vmin2 = 0, vmax2 = 1,
                                         cmap = col2D_name)
 
-cortex.quickshow(images['v_Rfingers'],with_curvature=True,with_sulci=True,with_colorbar=True)
+#cortex.quickshow(images['v_Rfingers'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-RHfingers.svg' %(z_threshold))
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['v_Rfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
+_ = cortex.quickflat.make_png(filename, images['v_Rfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
 cutout_name = 'zoom_roi_left'
@@ -288,7 +290,8 @@ _ = cortex.quickflat.make_figure(images['v_Rfingers'],
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-RH.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_Rfingers'], recache=True,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 
@@ -318,10 +321,11 @@ images['v_LHand'] = cortex.Vertex2D(z_LH_median_smooth,rsq_LH,
                                         vmin2 = 0, vmax2 = 1,
                                         cmap = col2D_name)
 
-cortex.quickshow(images['v_LHand'],with_curvature=True,with_sulci=True,with_colorbar=True)
+#cortex.quickshow(images['v_LHand'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-Lhand.svg'%z_threshold)
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['v_LHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+_ = cortex.quickflat.make_png(filename, images['v_LHand'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 # create costume colormp rainbow_r
@@ -329,16 +333,17 @@ col2D_name = os.path.splitext(os.path.split(add_alpha2colormap(colormap = 'rainb
 print('created costum colormap %s'%col2D_name)
 
 images['v_Lfingers'] = cortex.Vertex2D(COM_LH_median,rsq_LH, 
-                                        subject = params['processing']['space'],
+                                        subject = params['processing']['space'], #'fsaverage_meridians',
                                         vmin=0, vmax=4,
                                         vmin2 = 0, vmax2 = 1,
                                         cmap = col2D_name)
 
 
-cortex.quickshow(images['v_Lfingers'],with_curvature=True,with_sulci=True,with_colorbar=True)
+#cortex.quickshow(images['v_Lfingers'],with_curvature=True,with_sulci=True,with_colorbar=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-LHfingers.svg' %(z_threshold))
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['v_Lfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
+_ = cortex.quickflat.make_png(filename, images['v_Lfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
@@ -353,7 +358,8 @@ _ = cortex.quickflat.make_figure(images['v_Lfingers'],
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-LH.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_Lfingers'], recache=True,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 

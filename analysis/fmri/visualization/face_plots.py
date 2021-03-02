@@ -226,10 +226,11 @@ images['v_face'] = cortex.Vertex2D(all_zmasked_median,rsq_norm,
                                         cmap = col2D_name)
 
 
-#cortex.quickshow(images['v_face'],with_curvature=True,with_sulci=True,with_colorbar=True)
+#cortex.quickshow(images['v_face'],with_curvature=True,with_sulci=True,with_colorbar=True, curvature_brightness = 0.4, curvature_contrast = 0.1)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-face-vs-all.svg'%z_threshold)
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['v_face'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+_ = cortex.quickflat.make_png(filename, images['v_face'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # ignore smoothed nan voxels
 all_COM_median[np.isnan(all_zmasked_median)] = np.nan
@@ -240,16 +241,17 @@ print('created costum colormap %s'%col2D_name)
 
 # 'eyebrows', 'eyes', 'mouth','tongue', , combined
 images['v_facecombined'] = cortex.Vertex2D(all_COM_median,rsq_norm, 
-                                        subject = params['processing']['space'],
+                                        subject = params['processing']['space'], #'fsaverage_meridians',
                                         vmin=0, vmax=3,
                                         vmin2 = 0, vmax2 = 1,
                                         cmap = col2D_name)
 
 
-#cortex.quickshow(images['v_facecombined'],with_curvature=True,with_sulci=True,with_colorbar=True)
+#cortex.quickshow(images['v_facecombined'],with_curvature=True,with_sulci=True,with_colorbar=True,curvature_brightness = 0.4, curvature_contrast = 0.1)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_zscore-%.2f_type-eyebrows-eyes-mouth-tongue.svg' %(z_threshold))
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True)
+_ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
@@ -264,7 +266,8 @@ _ = cortex.quickflat.make_figure(images['v_facecombined'],
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-face_LH.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=True,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
 cutout_name = 'zoom_roi_right'
@@ -278,7 +281,8 @@ _ = cortex.quickflat.make_figure(images['v_facecombined'],
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-face_RH.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_facecombined'], recache=True,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 
