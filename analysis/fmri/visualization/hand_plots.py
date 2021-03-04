@@ -278,6 +278,8 @@ print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_Rfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,
                                 curvature_brightness = 0.4, curvature_contrast = 0.1)
 
+#cortex.utils.add_roi(images['v_Rfingers'], name='sub-%s_RH_z-%.2f'%(sj[0],z_threshold), open_inkscape=False)
+
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
 cutout_name = 'zoom_roi_left'
 _ = cortex.quickflat.make_figure(images['v_Rfingers'],
@@ -345,6 +347,7 @@ print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['v_Lfingers'], recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,
                                 curvature_brightness = 0.4, curvature_contrast = 0.1)
 
+#cortex.utils.add_roi(images['v_Lfingers'], name='sub-%s_LH_z-%.2f'%(sj[0],z_threshold), open_inkscape=False)
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
 cutout_name = 'zoom_roi_right'
