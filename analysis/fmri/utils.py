@@ -1245,7 +1245,8 @@ def spm_hrf(delay, TR):
     return hrf
 
 
-def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False, cmap_name = 'costum'):
+def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False, cmap_name = 'costum',
+                      discrete = False):
 
     """ add alpha channel to colormap,
     and save to pycortex filestore
@@ -1262,6 +1263,8 @@ def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False,
         (y can be from 0 to 1 or 1 to 0)
     cmap_name : str
         new cmap filename, final one will have _alpha_#-bins added to it
+    discrete : bool
+        if we want a discrete colormap or not (then will be continuous)
 
     Outputs
     -------
@@ -1279,20 +1282,24 @@ def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False,
         norm = plt.Normalize(min(cvals),max(cvals))
         tuples = list(zip(map(norm,cvals), colormap))
         cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", tuples)
-    
+        
+        if discrete == True: # if we want a discrete colormap from list
+            cmap = matplotlib.colors.ListedColormap(colormap)
+            bins = int(len(colormap))
+
     # convert into array
-    cmap_array = cmap(range(256))
+    cmap_array = cmap(range(bins))
     
     # make alpha array
     if invert_alpha == True: # in case we want to invert alpha (y from 1 to 0 instead pf 0 to 1)
-        _, alpha = np.meshgrid(np.linspace(0, 1, 256, endpoint=False), 1-np.linspace(0, 1, 256))
+        _, alpha = np.meshgrid(np.linspace(0, 1, bins, endpoint=False), 1-np.linspace(0, 1, bins))
     else:
-        _, alpha = np.meshgrid(np.linspace(0, 1, 256, endpoint=False), np.linspace(0, 1, 256, endpoint=False))
+        _, alpha = np.meshgrid(np.linspace(0, 1, bins, endpoint=False), np.linspace(0, 1, bins, endpoint=False))
     
     # reshape array for map
     new_map = []
     for i in range(cmap_array.shape[-1]):
-        new_map.append(np.tile(cmap_array[...,i],(256,1)))
+        new_map.append(np.tile(cmap_array[...,i],(bins,1)))
 
     new_map = np.moveaxis(np.array(new_map), 0, -1)
 
