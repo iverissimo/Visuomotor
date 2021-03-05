@@ -308,22 +308,41 @@ size_median = np.nanmedian(np.array(estimates_dict_smooth['size']), axis = 0)
 complex_location = xx_median + yy_median * 1j
 ecc_median = np.abs(complex_location)
 
-# mask within rsq threshold
-ecc_median[rsq_median<=rsq_threshold] = np.nan
-size_median[rsq_median<=rsq_threshold] = np.nan
+
+# need to mask again because smoothing removes nans
+rsq_median = mask_arr(rsq_median, threshold = rsq_threshold, side = 'above')
+ecc_median[np.isnan(rsq_median)] = np.nan
+size_median[np.isnan(rsq_median)] = np.nan
+
+# normalize the distribution, for better visualization
+rsq_norm = normalize(np.clip(rsq_median,rsq_threshold,.3)) 
 
 # plot 
 images = {}
 
-## Plot size
-images['ecc'] = cortex.Vertex(ecc_median, 'fsaverage',
-                           vmin=0, vmax=6,
-                           cmap='J4')
-#cortex.quickshow(images['ecc'],with_curvature=True,with_sulci=True,with_labels=False)
+# make costum colormap, similar to mackey paper
+n_bins = 256
+ECC_colors = add_alpha2colormap(colormap = ['#dd3933','#f3eb53','#7cb956','#82cbdb','#3d549f'],
+                               bins = n_bins, cmap_name = 'ECC_mackey_costum', discrete = False)
 
-filename = os.path.join(figures_pth,'flatmap_space-fsaverage_rsq-%0.2f_type-ecc.svg' %rsq_threshold)
+## Plot ecc
+# create costume colormp rainbow_r
+col2D_name = os.path.splitext(os.path.split(ECC_colors)[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
+
+images['ecc'] = cortex.Vertex2D(ecc_median, rsq_norm, 
+                        subject = 'fsaverage_meridians', #params['processing']['space'], #'fsaverage_meridians',
+                        vmin = 0, vmax = 6,
+                        vmin2 = 0, vmax2 = 1,
+                           cmap=col2D_name)
+cortex.quickshow(images['ecc'],with_curvature=True,with_sulci=True,with_labels=False,
+                 curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+filename = os.path.join(figures_pth,'flatmap_space-fsaverage_rsq-%0.2f_type-ECC_mackey_colorwheel.svg' %rsq_threshold)
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['ecc'], recache=True,with_colorbar=False,with_curvature=True,with_sulci=True,with_labels=False)
+_ = cortex.quickflat.make_png(filename, images['ecc'], recache=True,with_colorbar=False,with_curvature=True,with_sulci=True,with_labels=False,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
@@ -335,10 +354,11 @@ _ = cortex.quickflat.make_figure(images['ecc'],
                                  with_colorbar=False,
                                  cutout=cutout_name,height=2048)
 
-filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-ecc.svg')
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-ECC_mackey_colorwheel.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['ecc'], recache=False,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
 cutout_name = 'zoom_roi_right'
@@ -348,21 +368,36 @@ _ = cortex.quickflat.make_figure(images['ecc'],
                                  with_roi=False,
                                  with_colorbar=False,
                                  cutout=cutout_name,height=2048)
-filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-ecc.svg')
+filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-ECC_mackey_colorwheel.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['ecc'], recache=False,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # do same for size
 
-images['size'] = cortex.dataset.Vertex(size_median, 'fsaverage',
-                           vmin=0, vmax=6, 
-                           cmap='viridis_r')
-cortex.quickshow(images['size'],with_curvature=True,with_sulci=True)
+# make costum colormap viridis_r
+n_bins = 256
+SIZE_colors = add_alpha2colormap(colormap = 'viridis_r',
+                               bins = n_bins, cmap_name = 'SIZE_costum', discrete = False)
+
+col2D_name = os.path.splitext(os.path.split(SIZE_colors)[-1])[0]
+print('created costum colormap %s'%col2D_name)
+
+
+images['size'] = cortex.Vertex2D(size_median, rsq_norm, 
+                        subject = 'fsaverage_meridians', #params['processing']['space'], #'fsaverage_meridians',
+                        vmin = 0, vmax = 6,
+                        vmin2 = 0, vmax2 = 1,
+                           cmap=col2D_name)
+
+cortex.quickshow(images['size'],with_curvature=True,with_sulci=True,with_labels=False,
+                 curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_rsq-%0.2f_type-size.svg' %rsq_threshold)
 print('saving %s' %filename)
-_ = cortex.quickflat.make_png(filename, images['size'], recache=True,with_colorbar=False,with_curvature=True,with_sulci=True,with_labels=False)
+_ = cortex.quickflat.make_png(filename, images['size'], recache=True,with_colorbar=False,with_curvature=True,with_sulci=True,with_labels=False,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
@@ -377,7 +412,8 @@ _ = cortex.quickflat.make_figure(images['size'],
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-size.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['size'], recache=False,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
 cutout_name = 'zoom_roi_right'
@@ -390,7 +426,8 @@ _ = cortex.quickflat.make_figure(images['size'],
 filename = os.path.join(figures_pth,cutout_name+'_space-fsaverage_type-size.svg')
 print('saving %s' %filename)
 _ = cortex.quickflat.make_png(filename, images['size'], recache=False,with_colorbar=False,with_labels=False,
-                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048)
+                              cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
 
