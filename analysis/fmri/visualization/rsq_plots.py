@@ -109,7 +109,7 @@ for i,s in enumerate(sj): # for each subject (if all)
         new_rsq = masked_est['rsq']
 
         # save values in DF
-        if idx == 0 and i == 0:
+        if (idx == 0) and (i == 0):
             df_rsq_visual = pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s})
         else:
             df_rsq_visual = df_rsq_visual.append(pd.DataFrame({'roi': rois_ks,'rsq': [new_rsq],'sub': s}))
@@ -118,8 +118,12 @@ for i,s in enumerate(sj): # for each subject (if all)
 # ravel for violin plot 
 # (we want to include all voxels of all subs to see distribution)
 for idx,rois_ks in enumerate(ROIs): 
+
+    if len(sj)>1: 
+        rsq_4plot = np.concatenate(list(df_rsq_visual.loc[(df_rsq_visual['roi'] == rois_ks)]['rsq'][0])).ravel()
+    else:
+        rsq_4plot = df_rsq_visual.loc[(df_rsq_visual['roi'] == rois_ks)]['rsq'][0]
     
-    rsq_4plot = np.concatenate(list(df_rsq_visual.loc[(df_rsq_visual['roi'] == rois_ks)]['rsq'][0])).ravel()
     # threshold it
     rsq_4plot = rsq_4plot[rsq_4plot >= rsq_threshold] 
     
@@ -199,8 +203,12 @@ for i,s in enumerate(sj): # for each subject (if all)
 # ravel for violin plot 
 # (we want to include all voxels of all subs to see distribution)
 for idx,rois_ks in enumerate(ROIs): 
+
+    if len(sj)>1: 
+        rsq_4plot = p.concatenate(list(df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0])).ravel()
+    else:
+        rsq_4plot = df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0]
     
-    rsq_4plot = np.concatenate(list(df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0])).ravel()
     # threshold it
     rsq_4plot = rsq_4plot[rsq_4plot >= rsq_threshold] 
     
@@ -332,7 +340,7 @@ _ = cortex.quickflat.make_png(filename, images['rsq_soma_norm'], recache=False,w
 
 
 images['rsq_combined'] = cortex.Vertex2D(rsq_visual_smooth_norm,rsq_soma_smooth_norm, 
-                                        subject = params['processing']['space'],
+                                        subject = 'fsaverage_meridians', #params['processing']['space'],
                                         vmin = 0.125, vmax = 0.2,
                                         vmin2 = 0.2,vmax2 = 0.6,
                                         cmap = col2D_name)
