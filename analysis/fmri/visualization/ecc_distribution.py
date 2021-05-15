@@ -221,21 +221,13 @@ for i,region in enumerate(ROIs):
             DF_var[region][k] = np.nan
 
 
-# plot eccentricity difference matrix
 fig, ax = plt.subplots(1, 1, figsize=[2.5*x for x in plt.rcParams["figure.figsize"]], sharey=True)
 
-matrix = ax.matshow(DF_var,cmap='OrRd')
-plt.xticks(range(DF_var.shape[1]), DF_var.columns, fontsize=18)#, rotation=45)
-plt.yticks(range(DF_var.shape[1]), DF_var.columns, fontsize=18)
-cbar = fig.colorbar(matrix)
-matrix.set_clim(vmin=0,vmax=0.35)
-cbar.set_label('KS statistic', rotation=270, fontsize=30, labelpad=50)
-cbar.ax.tick_params(labelsize=18)
-
-# This is very hack-ish, but works to make grid
-plt.gca().set_xticks([x - 0.51 for x in plt.gca().get_xticks()][1:], minor='true')
-plt.gca().set_yticks([y - 0.52 for y in plt.gca().get_yticks()][1:], minor='true')
-plt.grid(which='minor')
+sns.heatmap(DF_var, linewidth=2, cmap='OrRd', square=True,vmin=0, vmax=0.35)#,cbar_kws={"shrink": 1})
+cax = plt.gcf().axes[-1]
+cax.tick_params(labelsize=30)
+ax.tick_params(labelsize=30, rotation = 0)
+plt.xticks(rotation=90) 
 
 fig.savefig(os.path.join(figures_pth,'RSA_ROI-all.svg'),dpi=100)
 
