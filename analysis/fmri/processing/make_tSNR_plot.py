@@ -54,7 +54,7 @@ post_fmriprep_pth = os.path.join(deriv_pth,'post_fmriprep') # path to post_fmrip
 
 
 # path to save plots
-out_dir = os.path.join(deriv_pth,'tSNR', task,'sub-{sj}'.format(sj=sj))
+out_dir = os.path.join(deriv_pth,'plots','tSNR', task,'sub-{sj}'.format(sj=sj))
 
 if not os.path.exists(out_dir):  # check if path exists
     os.makedirs(out_dir)
@@ -71,14 +71,14 @@ if task == 'prf':
 else:
     file_extension = '_sg.func.gii'
 
-post_filepath = [run for run in glob.glob(os.path.join(post_fmriprep_pth,'sub-{sj}'.format(sj=sj),'*','func/*')) if 'task-'+task in run and params['processing']['space'] in run and run.endswith(file_extension)]
+post_filepath = [os.path.join(post_fmriprep_pth,task,'sub-{sj}'.format(sj=sj),run) for run in os.listdir(os.path.join(post_fmriprep_pth,task,'sub-{sj}'.format(sj=sj))) if task in run and params['processing']['space'] in run and run.endswith(file_extension)]
 post_filepath.sort()
 
 
 # do same plots for pre and post processed files
 for files in ['pre','post']:
     
-    filename = orig_filename.copy() if files=='pre' else post_filename.copy() # choose correct list with absolute filenames
+    filename = orig_filename.copy() if files=='pre' else post_filepath.copy() # choose correct list with absolute filenames
     
     gii_files = []
     if run_type == 'single':
@@ -125,7 +125,7 @@ for files in ['pre','post']:
             plt.title('Histogram of tSNR values for %s run-%s of sub-%s'%(task,str(indx).zfill(2),sj))
             fig.savefig(os.path.join(out_dir,('histogram_'+new_filename).replace(params['processing']['extension'],'.png')), dpi=100)
             
-            up_lim = 200
+            up_lim = 170 #200
             low_lim = 0
             colormap = 'viridis'
 
