@@ -1,4 +1,4 @@
-Repository for Visuomotor mapping within prefrontal cortex
+Repository for Visuomotor mapping in frontal cortex
 
 *Under Development*
 
