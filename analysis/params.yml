@@ -24,7 +24,7 @@ general:
 
     fitting:
       where: 'local' #'lisa' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
-      
+
       cartesius:
         basedir: '/home/inesv/'
         derivatives: '/home/inesv/Visuomotor/Data/derivatives'
@@ -114,6 +114,8 @@ fitting:
   prf:
     fit_model: 'css'
 
+    type: 'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
+
     min_eccen: 0.25
     max_eccen: 15
 
@@ -134,6 +136,8 @@ fitting:
   soma:
     fit_smooth: False
     extension: 'sg_psc.func.gii'
+
+    type: 'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
 
     all_contrasts:
       face: ['eyebrows',

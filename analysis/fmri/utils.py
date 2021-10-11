@@ -39,7 +39,7 @@ from scipy import stats
 from scipy import misc
 
 
-def median_gii(files,outdir):
+def median_gii(files,outdir, run_name='median'):
 
     """ make median gii file (over runs)
 
@@ -71,7 +71,7 @@ def median_gii(files,outdir):
                                            extra = img_load.extra,
                                            darrays = darrays) # need to save as gii again
 
-    median_file = os.path.join(outdir,re.sub('run-\d{2}_','run-median_',os.path.split(files[0])[-1]))
+    median_file = os.path.join(outdir,re.sub('run-\d{2}_','run-%s_'%(run_name),os.path.split(files[0])[-1]))
     nb.save(median_gii,median_file)
 
     return median_file
