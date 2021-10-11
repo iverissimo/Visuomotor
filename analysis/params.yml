@@ -82,12 +82,15 @@ eyetracking:
 
   HP_pupil_f: 0.01
   LP_pupil_f: 6.0
-  sampling_freq": 1000
+  sampling_freq: 1000
+
+  sacc_thresh: 5 #6 # lambda, median-based standard deviations from the median estimator
+  minimum_saccade_duration: 0.006 # 0.016 # minimum duration to consider saccade (ms)
 
 plotting:
 
   prf:
-    rsq_threshold: 0.14 #0.17
+    rsq_threshold: 0.17 #0.14 #0.17
 
     n_bins: 10
     min_ecc: 0.25
