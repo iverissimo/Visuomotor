@@ -1323,4 +1323,58 @@ def add_alpha2colormap(colormap = 'rainbow_r', bins = 256, invert_alpha = False,
     return rgb_fn  
 
 
+def save_estimates(filename, estimates, mask_indices, orig_num_vert = 1974, model_type = 'gauss'):
+    
+    """
+    re-arrange estimates that were masked
+    and save all in numpy file
+    
+    Parameters
+    ----------
+    filename : str
+        absolute filename of estimates to be saved
+    estimates : arr
+        2d estimates that were obtained (datapoints,estimates)
+    mask_indices : arr
+        larray with voxel indices that were NOT masked out
+    orig_num_vert: int
+        original number of datapoints
+        
+    Outputs
+    -------
+    out_file: str
+        absolute output filename
+    
+    """ 
+    
+    final_estimates = np.zeros((orig_num_vert, estimates.shape[-1])); final_estimates[:] = np.nan
+    
+    counter = 0
+    
+    for i in range(orig_num_vert):
+        if i == mask_indices[counter]:
+            final_estimates[i] = estimates[mask_indices[counter]]
+            
+    if model_type == 'gauss':
+        
+        np.savez(filename,
+                 x = final_estimates[..., 0],
+                 y = final_estimates[..., 1],
+                 size = final_estimates[..., 2],
+                 betas = final_estimates[...,3],
+                 baseline = final_estimates[..., 4],
+                 r2 = final_estimates[..., 5])
+    
+    elif model_type == 'css':
+        np.savez(filename,
+                 x = final_estimates[..., 0],
+                 y = final_estimates[..., 1],
+                 size = final_estimates[..., 2],
+                 betas = final_estimates[...,3],
+                 baseline = final_estimates[..., 4],
+                 ns = final_estimates[..., 5],
+                 r2 = final_estimates[..., 6])
+        
+        
 
+    
