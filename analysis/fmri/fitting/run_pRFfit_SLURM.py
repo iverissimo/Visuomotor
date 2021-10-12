@@ -30,7 +30,7 @@ batch_string = """#!/bin/bash
 # call the programs
 echo "Job $SLURM_JOBID started at `date`" | mail $USER -s "Job $SLURM_JOBID"
 
-conda init i36
+source activate i36
 
 cp -r $DATADIR/ $TMPDIR
 
