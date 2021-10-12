@@ -1352,8 +1352,10 @@ def save_estimates(filename, estimates, mask_indices, orig_num_vert = 1974, mode
     counter = 0
     
     for i in range(orig_num_vert):
-        if i == mask_indices[counter]:
-            final_estimates[i] = estimates[mask_indices[counter]]
+        if i <= mask_indices[-1]:
+            if i == mask_indices[counter]:
+                final_estimates[i] = estimates[counter]
+                counter += 1
             
     if model_type == 'gauss':
         
