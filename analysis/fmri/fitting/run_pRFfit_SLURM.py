@@ -21,10 +21,10 @@ total_chunks = params['fitting']['prf']['total_chunks']
 loo_runs = ['leave_01_out','leave_02_out','leave_03_out','leave_04_out','leave_05_out']
 
 batch_string = """#!/bin/bash
-#SBATCH -t 100:00:00
-#SBATCH -N 1 --mem=65536
+#SBATCH -t 48:00:00
+#SBATCH -N 1
 #SBATCH -v
-#SBATCH -c 24
+#SBATCH -c 16
 #SBATCH --output=$BATCHDIR/slurm_PRF-%A.out
 
 # call the programs
