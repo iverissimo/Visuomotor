@@ -23,7 +23,7 @@ general:
     analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
 
     fitting:
-      where: 'lisa' #'local' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
+      where: 'local' #'local' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
 
       cartesius:
         basedir: '/home/inesv/'
@@ -32,7 +32,7 @@ general:
       lisa:
         basedir: '/home/inesv/'
         derivatives: '/scratch/Visuomotor_data/Data/derivatives'
-        data_dir: '/scratch/Visuomotor_data'
+        data_dir: '/home/inesv/Visuomotor_data'
 
       local:
         basedir: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor'

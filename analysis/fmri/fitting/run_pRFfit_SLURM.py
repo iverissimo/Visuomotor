@@ -40,7 +40,7 @@ python $PY_CODE $SJ_NR $CHUNK_NR $RUN_TYPE
 
 wait          # wait until programs are finished
 
-rsync -chavzP $TMPDIR/$DATADIR/ $DATADIR
+rsync -chavzP $TMPDIR/Visuomotor_data/ $DATADIR
 
 wait
 
