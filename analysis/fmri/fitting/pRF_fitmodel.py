@@ -80,6 +80,12 @@ postfmriprep_pth = os.path.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.forma
 
 # type of fit, if on median run or loo runs
 fit_type = params['fitting']['prf']['type']
+
+if params['fitting']['prf']['type'] == 'loo_run':
+    # list with left out run path (iff gii, then 2 hemispheres)
+    gii_lo_run = [op.join(postfmriprep_pth, h) for h in os.listdir(postfmriprep_pth) if 'run-'+run_type[6:8] in h and 
+                  h.endswith(params['fitting']['prf']['extension'])]
+
 # type of model to fit
 model_type = params['fitting']['prf']['fit_model']
 
@@ -103,7 +109,7 @@ print('fitting functional files from %s'%input_file_pth)
 med_gii = [op.join(input_file_pth, h) for h in os.listdir(input_file_pth) if run_type in h]
 
 # fit model per hemisphere
-for gii_file in med_gii:
+for w,gii_file in enumerate(med_gii):
 
     ### define filenames for grid and search estimates
 
@@ -143,6 +149,7 @@ for gii_file in med_gii:
         
         # define non nan voxels for sanity check
         not_nan_vox = np.where(~np.isnan(data[...,0]))[0]
+        print('masked data with shape %s'%(str(data[not_nan_vox].shape)))
         
         # if there are nan voxels
         if len(not_nan_vox)>0:
@@ -223,7 +230,8 @@ for gii_file in med_gii:
 
 
             # define model 
-            gauss_model = Iso2DGaussianModel(stimulus = prf_stim)#,
+            gauss_model = Iso2DGaussianModel(stimulus = prf_stim
+                                            )
                                             #hrf = hrf)
         
             ## GRID FIT
@@ -261,6 +269,37 @@ for gii_file in med_gii:
             # save iterative estimates
             save_estimates(it_estimates_filename, estimates_it, 
                            not_nan_vox, orig_num_vert = data.shape[0], model_type = 'gauss')
+
+            # cross validate on left out run, if such is the case
+            if params['fitting']['prf']['type'] == 'loo_run':
+    
+                print('loading data from left out run %s' % gii_lo_run[w])
+                data_loo = np.array(surface.load_surf_data(gii_lo_run[w]))
+                
+                print('data array with shape %s'%str(data_loo.shape))
+                
+                # masked data to be equal size from fitted data
+                masked_data_loo = data_loo[not_nan_vox]
+                print('masked data loo with shape %s'%(str(masked_data_loo.shape)))
+                
+                # crossvalidate, just to obtain the CV R2 values
+                gauss_fitter.crossvalidate_fit(masked_data_loo)
+                
+                # save estimates
+                estimates_it_CV = gauss_fitter.iterative_search_params
+                
+                # file path 
+                CV_estimates_filename = it_estimates_filename.replace('iterative_gauss', 'CV')
+                
+                if not op.exists(op.split(CV_estimates_filename)[0]): # check if path to save CV files exist
+                    os.makedirs(op.split(CV_estimates_filename)[0]) 
+                
+                # save iterative estimates
+                save_estimates(CV_estimates_filename, estimates_it_CV, 
+                            not_nan_vox, orig_num_vert = data.shape[0], model_type = 'gauss')   
+
+
+
             
             
 # Print duration
