@@ -31,8 +31,8 @@ general:
 
       lisa:
         basedir: '/home/inesv/'
-        derivatives: '/home/inesv/Visuomotor_data/Data/derivatives'
-        data_dir: '/home/inesv/Visuomotor_data'
+        derivatives: '/scratch/Visuomotor_data/Data/derivatives'
+        data_dir: '/scratch/Visuomotor_data'
 
       local:
         basedir: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor'
