@@ -23,6 +23,7 @@ from joblib import Parallel, delayed
 sys.path.append(os.path.split(os.getcwd())[0]) # so script finds utils.py
 from utils import * #import script to use relevante functions
 
+import datetime
 
 # load settings from yaml
 with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.yml'), 'r') as f_in:

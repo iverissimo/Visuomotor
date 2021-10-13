@@ -5,7 +5,7 @@
 ################################################
 
 
-import re, os
+import os
 import os.path as op
 import yaml, sys
 
