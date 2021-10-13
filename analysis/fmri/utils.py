@@ -945,8 +945,8 @@ def fit_glm(voxel, dm):
     """
 
     if np.isnan(voxel).any():
-        betas = np.nan
-        prediction = np.nan
+        betas = np.repeat(np.nan, dm.shape[-1])
+        prediction = np.repeat(np.nan, dm.shape[0])
         mse = np.nan
         r2 = np.nan
 
