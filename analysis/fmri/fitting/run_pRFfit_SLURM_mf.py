@@ -61,7 +61,7 @@ missing_files = pd.read_csv(op.join(op.split(pycode_dir)[0],'missing_files.csv')
 
 #os.chdir(batch_dir)
 
-for i in range(missing_files):
+for i in range(len(missing_files)):
 
     working_string = batch_string.replace('$SJ_NR', new_missing_files.iloc[i]['sub'])
     working_string = working_string.replace('$CHUNK_NR', str(int(new_missing_files.iloc[i]['chunk'])).zfill(3))
