@@ -1378,5 +1378,101 @@ def save_estimates(filename, estimates, mask_indices, orig_num_vert = 1974, mode
                  r2 = final_estimates[..., 6])
         
         
+def fit_glm_get_t_stat(voxel, dm, contrast):
+    
+    """ GLM fit on timeseries
+    Regress a created design matrix on the input_data.
+    +
+    and compute simple contrast
+    (used to compute run-level analyses)
+    
+    Parameters
+    ----------
+    voxel : arr
+        timeseries of a single voxel
+    dm : arr
+        DM array (#TR,#regressors)
+    contrast: arr
+        contrast vector
+    
+    Outputs
+    -------
+    betas : arr
+        betas for model
+    r2 : arr
+        coefficient of determination
+    t_val : float
+        t-statistic for that voxel relative to contrast
+    cb: effect size
+        dot product of the contrast vector and the parameters
+    
+    """
+    
+    def design_variance(X, which_predictor=1):
 
+        ''' Returns the design variance of a predictor (or contrast) in X.
+
+        Parameters
+        ----------
+        X : numpy array
+            Array of shape (N, P)
+        which_predictor : int or list/array
+            The index of the predictor you want the design var from.
+            Note that 0 refers to the intercept!
+            Alternatively, "which_predictor" can be a contrast-vector
+
+        Outputs
+        -------
+        des_var : float
+            Design variance of the specified predictor/contrast from X.
+        '''
+
+        is_single = isinstance(which_predictor, int)
+        if is_single:
+            idx = which_predictor
+        else:
+            idx = np.array(which_predictor) != 0
+
+        c = np.zeros(X.shape[1])
+        c[idx] = 1 if is_single == 1 else which_predictor[idx]
+        des_var = c.dot(np.linalg.pinv(X.T.dot(X))).dot(c.T)
+
+        return des_var
+
+    if np.isnan(voxel).any():
+        betas = np.repeat(np.nan, dm.shape[-1]-1) # betas from the fit
+        r2 = np.nan
+        t_val = np.nan # t-statistic 
+        cb = np.nan # effect_size => dot product of the contrast vector and the parameters
+        effect_var = np.nan
+
+    else:   # if not nan (some vertices might have nan values)
+        
+        ######### FIT GLM ###########
+        betas = np.linalg.lstsq(dm, voxel, rcond = -1)[0]
+        prediction = dm.dot(betas)
+
+        mse = np.mean((voxel - prediction) ** 2) # calculate mean of squared residuals
+        r2 = pearsonr(prediction, voxel)[0] ** 2 # and the rsq
+        
+        ##### COMPUTE STATS ON CONTRAST #########
+        # calculate design variance
+        design_var = design_variance(dm, contrast)
+        
+        # sum of squared errors
+        sse = ((voxel - (dm.dot(betas))) ** 2).sum() 
+        
+        #degrees of freedom = N - P = timepoints - predictores
+        df = (dm.shape[0] - dm.shape[1])
+        
+        # effect size
+        cb = contrast.dot(betas)
+
+        # effect variance
+        effect_var = (sse/df) * design_var
+        
+        # t statistic for vertex
+        t_val = cb / np.sqrt(effect_var)
+    
+    return betas, r2, t_val, cb, effect_var
     
