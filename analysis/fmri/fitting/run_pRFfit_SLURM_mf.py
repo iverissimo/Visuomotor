@@ -63,14 +63,14 @@ missing_files = pd.read_csv(op.join(op.split(pycode_dir)[0],'missing_files.csv')
 
 for i in range(len(missing_files)):
 
-    working_string = batch_string.replace('$SJ_NR', new_missing_files.iloc[i]['sub'])
-    working_string = working_string.replace('$CHUNK_NR', str(int(new_missing_files.iloc[i]['chunk'])).zfill(3))
+    working_string = batch_string.replace('$SJ_NR', missing_files.iloc[i]['sub'])
+    working_string = working_string.replace('$CHUNK_NR', str(int(missing_files.iloc[i]['chunk'])).zfill(3))
     working_string = working_string.replace('$PY_CODE', pycode_dir)
     working_string = working_string.replace('$BATCHDIR', batch_dir)
-    working_string = working_string.replace('$RUN_TYPE', new_missing_files.iloc[i]['run_type'])
+    working_string = working_string.replace('$RUN_TYPE', missing_files.iloc[i]['run_type'])
     working_string = working_string.replace('$DATADIR', data_dir)
 
-    js_name = os.path.join(batch_dir, 'pRF_sub-' + new_missing_files.iloc[i]['sub'] + '_chunk-%s_of_%s'%(str(int(new_missing_files.iloc[i]['chunk'])).zfill(3),str(total_chunks).zfill(3)) + '_iterative.sh')
+    js_name = os.path.join(batch_dir, 'pRF_sub-' + missing_files.iloc[i]['sub'] + '_chunk-%s_of_%s'%(str(int(missing_files.iloc[i]['chunk'])).zfill(3),str(total_chunks).zfill(3)) + '_iterative.sh')
     of = open(js_name, 'w')
     of.write(working_string)
     of.close()
