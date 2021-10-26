@@ -3,7 +3,7 @@
 
 import os, re
 import numpy as np
-
+import os.path as op
 import shutil
 
 import pandas as pd
@@ -1476,3 +1476,120 @@ def fit_glm_get_t_stat(voxel, dm, contrast):
     
     return betas, r2, t_val, cb, effect_var
     
+
+def mean_epi_gii(list_filenames, outdir):
+
+    """ Make mean EPI over the time course
+    to make a vasculature map
+    (will normalize mean EPI, and average across runs too)
+    
+    Parameters
+    ----------
+    list_filenames : list
+        list of absolute filenames, for all runs, both hemispheres
+    outdir : str
+        path to directory where to store median EPI
+    
+    Outputs
+    -------
+    out_filenames : list
+        list with computed filenames
+    
+    """
+    
+    out_filenames = []
+    
+    # laod each hemi
+    for field in ['hemi-L', 'hemi-R']:
+        
+        # get all func files for that hemi
+        hemi_files = [h for h in list_filenames if field in h]
+    
+        hemi_all = []
+        
+        for _,file in enumerate(hemi_files):
+            
+            # load data for a run
+            img_load = nb.load(file)
+            run_data = np.array([img_load.darrays[i].data for i in range(len(img_load.darrays))]) #load surface data
+
+            # average the EPI time course 
+            mean_data = np.mean(run_data, axis=0)
+
+            # normalize image by dividing the value of each vertex by the value of the vertex with the maximum intensity
+            norm_data = normalize(mean_data)
+
+            # append normalized run
+            hemi_all.append(norm_data)
+        
+        # average al runs
+        median_img = np.mean(hemi_all, axis = 0)
+
+        darrays = [nb.gifti.gifti.GiftiDataArray(d) for d in median_img]
+        median_gii = nb.gifti.gifti.GiftiImage(header = img_load.header,
+                                               extra = img_load.extra,
+                                               darrays = darrays) # need to save as gii again
+
+        median_file = op.join(outdir, re.sub('run-\d{2}_','run-median_',op.split(file)[-1]).replace('.func.gii','_meanEPI.func.gii'))
+        nb.save(median_gii,median_file)
+
+        print('computed %s'%median_file)
+        out_filenames.append(median_file)
+        
+    return out_filenames
+
+
+def make_raw_vertex_image(data2plot,cmap,vmin,vmax,subject='fsaverage_meridians'):  
+    """ function to fix web browser bug in pycortex
+        allows masking of data with nans
+    
+    Parameters
+    ----------
+    data2plot : array
+        data array
+    cmap : str
+        string with colormap name
+    vmin: int/float
+        minimum value
+    vmax: int/float 
+        maximum value
+    subject: str
+        overlay subject name to use
+    
+    Outputs
+    -------
+    vx_fin : VertexRGB
+        vertex object to call in webgl
+    
+    """
+    
+    # Get curvature
+    curv = cortex.db.get_surfinfo(subject,type='curvature',recache=False)#,smooth=1)
+    # Adjust curvature contrast / color. Alternately, you could work
+    # with curv.data, maybe threshold it, and apply a color map. 
+    curv.vmin = -1
+    curv.vmax = 1
+    curv.cmap = 'gray'
+    
+    curv.data[curv.data>0] = .1
+    curv.data[curv.data<=0] = -.1
+    
+    # Create display data (Face, HANDS, legs)
+    vx = cortex.Vertex(data2plot, subject, cmap=cmap, vmin=vmin, vmax=vmax)
+
+    # Map to RGB
+    vx_rgb = np.vstack([vx.raw.red.data, vx.raw.green.data, vx.raw.blue.data])
+    curv_rgb = np.vstack([curv.raw.red.data, curv.raw.green.data, curv.raw.blue.data])
+
+    # Pick an arbitrary region to mask out
+    # (in your case you could use np.isnan on your data in similar fashion)
+    alpha = ~np.isnan(data2plot) #(data < 0.2) | (data > 0.4)
+    alpha = alpha.astype(np.float)
+
+    # Alpha mask
+    display_data = vx_rgb * alpha + curv_rgb * (1-alpha)
+
+    # Create vertex RGB object out of R, G, B channels
+    vx_fin = cortex.VertexRGB(*display_data, subject,curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+    return vx_fin
