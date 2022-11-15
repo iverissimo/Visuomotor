@@ -5,8 +5,8 @@
 ################################################
 
 
-import re, os
-import glob, yaml
+import os
+import yaml
 import sys
 
 import numpy as np
@@ -55,7 +55,7 @@ estimate_soma_ext = file_extension['soma'].replace('.func.gii','')+'_estimates.n
 fit_where = params['general']['paths']['fitting']['where'] # where we are working
 deriv_pth = params['general']['paths']['fitting'][fit_where]['derivatives'] # path to derivatives folder
 
-figures_pth = os.path.join(deriv_pth,'plots','rsq_plots','sub-{sj}'.format(sj=sj)) # path to save plots
+figures_pth = os.path.join(deriv_pth,'plots','NEW_rsq_plots','sub-{sj}'.format(sj=sj)) # path to save plots
 if not os.path.exists(figures_pth):
     os.makedirs(figures_pth) 
 
@@ -205,7 +205,7 @@ for i,s in enumerate(sj): # for each subject (if all)
 for idx,rois_ks in enumerate(ROIs): 
 
     if len(sj)>1: 
-        rsq_4plot = p.concatenate(list(df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0])).ravel()
+        rsq_4plot = np.concatenate(list(df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0])).ravel()
     else:
         rsq_4plot = df_rsq_soma.loc[(df_rsq_soma['roi'] == rois_ks)]['rsq'][0]
     
@@ -304,7 +304,7 @@ rsq_soma_smooth_norm = normalize(rsq_soma_smooth)
 
 # create costume colormp red blue
 n_bins = 256
-col2D_name = os.path.splitext(os.path.split(make_2D_colormap(rgb_color='101',bins = n_bins))[-1])[0]
+col2D_name = os.path.splitext(os.path.split(make_2D_colormap(rgb_color='110',bins = n_bins,scale=[1,0.65]))[-1])[0]
 print('created costum colormap %s'%col2D_name)
 
 
@@ -328,8 +328,8 @@ _ = cortex.quickflat.make_png(filename, images['rsq_visual_norm'], recache=False
 
 images['rsq_soma_norm'] = cortex.Vertex(rsq_soma_smooth_norm, 
                                           params['processing']['space'],
-                                           vmin = 0.2, vmax = .6,
-                                           cmap='Blues')
+                                           vmin = 0.2, vmax = .6, #.7,
+                                           cmap='Greens')
 #cortex.quickshow(images['rsq_soma_norm'],with_curvature=True,with_sulci=True)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_soma.svg')
 print('saving %s' %filename)
@@ -342,7 +342,7 @@ _ = cortex.quickflat.make_png(filename, images['rsq_soma_norm'], recache=False,w
 images['rsq_combined'] = cortex.Vertex2D(rsq_visual_smooth_norm,rsq_soma_smooth_norm, 
                                         subject = 'fsaverage_meridians', #params['processing']['space'],
                                         vmin = 0.125, vmax = 0.2,
-                                        vmin2 = 0.2,vmax2 = 0.6,
+                                        vmin2 = 0.2,vmax2 = .6, #0.7,
                                         cmap = col2D_name)
 #cortex.quickshow(images['rsq_combined'],recache=True,with_curvature=True,with_sulci=True,with_roi=False,with_labels=False)#,height=2048)
 filename = os.path.join(figures_pth,'flatmap_space-fsaverage_type-rsquared-normalized_multimodal.svg')

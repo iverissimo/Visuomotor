@@ -89,7 +89,7 @@ estimates_filename = [os.path.join(fits_pth,x) for _,x in enumerate(os.listdir(f
 estimates = np.load(estimates_filename,allow_pickle=True)
 print('loading estimates array from %s'%estimates_filename)
 
-blue_color = ['#004759','#00a7d1']
+blue_color = ['#035900','#18d100'] #['#004759','#00a7d1']
 data_color = ['#262626','#8a8a8a']
 
 fig, axis = plt.subplots(1,figsize=(15,7.5),dpi=100)

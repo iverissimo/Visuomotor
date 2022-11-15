@@ -815,7 +815,7 @@ def normalize(M):
     return (M-np.nanmin(M))/(np.nanmax(M)-np.nanmin(M))
 
 
-def make_2D_colormap(rgb_color = '101', bins = 50):
+def make_2D_colormap(rgb_color = '101', bins = 50, scale=[1,1]):
     """
     generate 2D basic colormap
     and save to pycortex filestore
@@ -823,8 +823,8 @@ def make_2D_colormap(rgb_color = '101', bins = 50):
     
     ##generating grid of x bins
     x,y = np.meshgrid(
-        np.linspace(0,1,bins),
-        np.linspace(0,1,bins)) 
+        np.linspace(0,1*scale[0],bins),
+        np.linspace(0,1*scale[1],bins)) 
     
     # define color combination for plot
     if rgb_color=='101': #red blue
@@ -1439,7 +1439,7 @@ def fit_glm_get_t_stat(voxel, dm, contrast):
 
         return des_var
 
-    if np.isnan(voxel).any():
+    if np.isnan(voxel).any() or np.isnan(dm).any():
         betas = np.repeat(np.nan, dm.shape[-1]-1) # betas from the fit
         r2 = np.nan
         t_val = np.nan # t-statistic 
