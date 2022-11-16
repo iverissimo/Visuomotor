@@ -18,7 +18,7 @@ base_dir = 'lisa' # where we are running the scripts
 # number of chunks to split data in (makes fitting faster)
 total_chunks = params['fitting']['prf']['total_chunks']
 
-loo_runs = ['leave_01_out','leave_02_out','leave_03_out','leave_04_out','leave_05_out']
+runs2fit = ['mean'] #['leave_01_out','leave_02_out','leave_03_out','leave_04_out','leave_05_out']
 
 batch_string = """#!/bin/bash
 #SBATCH -t 48:00:00

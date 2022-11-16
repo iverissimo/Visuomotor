@@ -13,26 +13,25 @@ import sys
 with open(os.path.join(os.path.split(os.path.split(os.getcwd())[0])[0],'params.yml'), 'r') as f_in:
     params = yaml.safe_load(f_in)
 
-subjects = ['01','02','04','08','09','11','12'] # subjects
+subjects = ['01'] #['01','02', '03','04', '05', '07','08','09','11','12', '13'] #['01','02','04','08','09','11','12'] # subjects
 base_dir = 'lisa' # where we are running the scripts
 # number of chunks to split data in (makes fitting faster)
 total_chunks = params['fitting']['prf']['total_chunks']
 
-loo_runs = ['leave_01_out','leave_02_out','leave_03_out','leave_04_out','leave_05_out']
+runs2fit = ['mean'] #['leave_01_out','leave_02_out','leave_03_out','leave_04_out','leave_05_out']
 
 batch_string = """#!/bin/bash
 #SBATCH -t 48:00:00
 #SBATCH -N 1
 #SBATCH -v
 #SBATCH -c 16
-#SBATCH --output=$BATCHDIR/slurm_PRF-%A.out
+#SBATCH --output=$BATCHDIR/slurm_Visuomotor_PRF-%A.out
 
 # call the programs
-echo "Job $SLURM_JOBID started at `date`" | mail $USER -s "Job $SLURM_JOBID"
 
-source activate i36
+source activate i38
 
-cp -r $DATADIR/ $TMPDIR
+cp -r $DATADIR $TMPDIR
 
 wait
 
@@ -44,7 +43,6 @@ rsync -chavzP $TMPDIR/Visuomotor_data/ $DATADIR
 
 wait
 
-echo "Job $SLURM_JOBID finished at `date`" | mail $USER -s "Job $SLURM_JOBID"
 """
 
 # base directory 
@@ -61,7 +59,7 @@ data_dir = params['general']['paths']['fitting']['lisa']['data_dir']
 
 for sub in subjects:
 
-    for rt in loo_runs:
+    for rt in runs2fit:
 
         for _,chu in enumerate(range(total_chunks)): # submit job for each chunk
 
@@ -72,7 +70,7 @@ for sub in subjects:
             working_string = working_string.replace('$RUN_TYPE', rt)
             working_string = working_string.replace('$DATADIR', data_dir)
 
-            js_name = os.path.join(batch_dir, 'pRF_sub-' + str(sub).zfill(2) + '_chunk-%s_of_%s'%(str(chu+1).zfill(3),str(total_chunks).zfill(3)) + '_iterative.sh')
+            js_name = os.path.join(batch_dir, 'Visuomotor_pRF_sub-' + str(sub).zfill(2) + '_chunk-%s_of_%s'%(str(chu+1).zfill(3),str(total_chunks).zfill(3)) + '_iterative.sh')
             of = open(js_name, 'w')
             of.write(working_string)
             of.close()

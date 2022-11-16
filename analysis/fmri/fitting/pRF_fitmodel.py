@@ -13,19 +13,15 @@ import numpy as np
 
 from nilearn import surface
 
-sys.path.append(os.path.split(os.getcwd())[0]) # so script finds utils.py
-from utils import * #import script to use relevante functions
+sys.path.append(os.path.split(os.getcwd())[0]) # so script finds visuomotor_utils.py
+from visuomotor_utils import make_prf_dm, save_estimates #import script to use relevante functions
 
-import nibabel as nb
 
 # requires pfpy be installed - preferably with python setup.py develop
-from prfpy.rf import *
-from prfpy.timecourse import *
 from prfpy.stimulus import PRFStimulus2D
-from prfpy.model import Iso2DGaussianModel
-from prfpy.fit import Iso2DGaussianFitter
+from prfpy.model import Iso2DGaussianModel, CSS_Iso2DGaussianModel
+from prfpy.fit import Iso2DGaussianFitter, CSS_Iso2DGaussianFitter
 
-from popeye import utilities
 import datetime
 
 # load settings from yaml
@@ -60,6 +56,9 @@ start_time = datetime.datetime.now()
 # number of chunks that data was split in
 total_chunks = params['fitting']['prf']['total_chunks']
 
+# fit hrf?
+fit_hrf = params['fitting']['prf']['fit_hrf']
+
 # use smoothed data?
 fit_smooth = params['fitting']['prf']['fit_smooth']
 
@@ -76,7 +75,7 @@ if fit_smooth:
 fit_where = params['general']['paths']['fitting']['where'] # where are we fitting
 
 deriv_pth = params['general']['paths']['fitting'][fit_where]['derivatives'] # path to derivatives folder
-postfmriprep_pth = os.path.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.format(sj=sj)) # path to post_fmriprep files
+postfmriprep_pth = op.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.format(sj=sj)) # path to post_fmriprep files
 
 # type of fit, if on median run or loo runs
 fit_type = params['fitting']['prf']['type']
@@ -94,10 +93,10 @@ out_pth = op.join(deriv_pth,'pRF_fit','sub-{sj}'.format(sj=sj), model_type, fit_
 if fit_type == 'loo_run':
     out_pth = op.join(out_pth,run_type) 
  
-if not op.exists(out_pth): # check if path to save processed files exist
-    os.makedirs(out_pth) 
-    if model_type!='gauss':
-        os.makedirs(out_pth.replace(model_type,'gauss')) #also make gauss dir, to save intermediate estimates
+# check if path to save processed files exist
+os.makedirs(out_pth, exist_ok=True) 
+if model_type!='gauss':
+    os.makedirs(out_pth.replace(model_type,'gauss'), exist_ok=True) #also make gauss dir, to save intermediate estimates
 
 # get list of files to fit
 input_file_pth = op.join(postfmriprep_pth,fit_type)
@@ -120,12 +119,15 @@ for w,gii_file in enumerate(med_gii):
     #filename the estimates of the iterative fit
     it_estimates_filename = grid_estimates_filename.replace('gauss', 'iterative_gauss')
     
-    if not op.exists(op.split(it_estimates_filename)[0]): # check if path to save iterative files exist
-        os.makedirs(op.split(it_estimates_filename)[0]) 
+    os.makedirs(op.split(it_estimates_filename)[0], exist_ok=True) 
 
     if model_type=='css':
         #filename the estimates of the css fit
-        css_estimates_filename = grid_estimates_filename.replace('gauss', 'css')
+        grid_css_estimates_filename = grid_estimates_filename.replace('gauss', 'css')
+        os.makedirs(op.split(grid_css_estimates_filename)[0], exist_ok=True) 
+
+        it_css_estimates_filename = grid_estimates_filename.replace('gauss', 'iterative_css')
+        os.makedirs(op.split(it_css_estimates_filename)[0], exist_ok=True) 
        
     ### now actually fit the data, if it was not fit before
     
@@ -133,7 +135,6 @@ for w,gii_file in enumerate(med_gii):
         print('already exists %s'%it_estimates_filename)
 
     else:
-        
         # load data
         print('loading data from %s' % gii_file)
         data_all = np.array(surface.load_surf_data(gii_file))
@@ -163,37 +164,20 @@ for w,gii_file in enumerate(med_gii):
             estimates_it = np.zeros((data.shape[0],6)); estimates_it[:] = np.nan
 
         else:
-
-            # get screenshot pngs
-            png_path = op.join(os.getcwd(),'prf_stimuli')
-            png_filename = [op.join(png_path, png) for png in os.listdir(png_path)]
-            png_filename.sort()
-
-            # set design matrix filename
-            dm_filename = op.join(os.getcwd(), 'prf_dm_square.npy')
-
             # subjects that did pRF task with linux computer, so res was full HD
             HD_subs = [str(num).zfill(2) for num in params['general']['HD_screen_subs']] 
             res = params['general']['screenRes_HD'] if str(sj).zfill(2) in HD_subs else params['general']['screenRes']
 
-            # create design matrix
-            screenshot2DM(png_filename, 0.1, res, dm_filename, dm_shape = 'square')  # create it
-
-            print('computed %s' % (dm_filename))
-
-            # actually load DM
-            prf_dm = np.load(dm_filename,allow_pickle=True)
-            prf_dm = prf_dm.T # then it'll be (x, y, t)
-
-            # shift it to be average of every 2TRs DM
-            prf_dm = shift_DM(prf_dm)
-
-            # crop DM because functional data also cropped 
-            prf_dm = prf_dm[:,:,params['processing']['crop_pRF_TR']:]
+            ## make prf dm (x, y, t)
+            prf_dm = make_prf_dm(res_scaling = .1, screen_res = res, dm_shape = 'square',
+                                bar_width_ratio = 0.125, iti = params['fitting']['prf']['PRF_ITI_in_TR'],
+                                bar_pass_in_TRs = params['fitting']['prf']['bar_pass_in_TRs'],
+                                bar_pass_direction = params['fitting']['prf']['bar_pass_direction'],
+                                run_lenght_TR = 90, 
+                                crop_nr = params['processing']['crop_pRF_TR'], shift = -1)
 
             # define model params
             TR = params['general']['TR']
-            hrf = utilities.spm_hrf(0,TR)
 
             # make stimulus object, which takes an input design matrix and sets up its real-world dimensions
             prf_stim = PRFStimulus2D(screen_size_cm = params['general']['screen_width'],
@@ -207,12 +191,17 @@ for w,gii_file in enumerate(med_gii):
             eccs = params['fitting']['prf']['max_eccen'] * np.linspace(np.sqrt(params['fitting']['prf']['min_eccen']/params['fitting']['prf']['max_eccen']),1,grid_nr)**2
             polars = np.linspace(0, 2*np.pi, grid_nr)
 
+            # for css
+            n_grid = np.linspace(params['fitting']['prf']['min_n'], 
+                                 params['fitting']['prf']['max_n'], 
+                                    20, dtype='float32')
+
             # to set up parameter bounds in iterfit
             inf = np.inf
             eps = 1e-1
             ss = prf_stim.screen_size_degrees
-            xtol = 1e-7
-            ftol = 1e-6
+            xtol = 1e-4
+            ftol = 1e-4
 
             # model parameter bounds
             gauss_bounds = [(-2*ss, 2*ss),  # x
@@ -228,22 +217,31 @@ for w,gii_file in enumerate(med_gii):
                           (-5, +inf),  # bold baseline
                           (params['fitting']['prf']['min_n'], params['fitting']['prf']['max_n'])]  # CSS exponent
 
+            ## if we want to make baseline fixed
+            fixed_grid_baseline = None
 
             # define model 
-            gauss_model = Iso2DGaussianModel(stimulus = prf_stim
-                                            )
-                                            #hrf = hrf)
+            gauss_model = Iso2DGaussianModel(stimulus = prf_stim,
+                                            filter_predictions = True,
+                                            filter_type = 'dc',
+                                            filter_params = {'highpass': True,
+                                                            'add_mean': True,
+                                                            'window_length': 201,
+                                                            'polyorder': 3}
+                                        )
         
             ## GRID FIT
-            print("Grid fit")
+            print("Gauss Grid fit")
             gauss_fitter = Iso2DGaussianFitter(data = masked_data, 
                                                model = gauss_model, 
-                                               n_jobs = 16)
+                                               n_jobs = 16,
+                                               fit_hrf = fit_hrf)
 
             gauss_fitter.grid_fit(ecc_grid = eccs, 
                                   polar_grid = polars, 
                                   size_grid = sizes, 
-                                  pos_prfs_only = True)
+                                  fixed_grid_baseline = fixed_grid_baseline,
+                                  grid_bounds = [(0,1000)]) #only prf amplitudes between 0 and 1000
 
 
             estimates_grid = gauss_fitter.gridsearch_params
@@ -253,12 +251,10 @@ for w,gii_file in enumerate(med_gii):
                            not_nan_vox, orig_num_vert = data.shape[0], model_type = 'gauss')
             
             ## ITERATIVE FIT
-            print("Iterative fit")
-            
-            # iterative fit
-            print("Iterative fit")
+            print("Gauss Iterative fit")
+
             gauss_fitter.iterative_fit(rsq_threshold = 0.05, 
-                                       verbose = False,
+                                       verbose = True,
                                        bounds=gauss_bounds,
                                        xtol = xtol,
                                        ftol = ftol)
@@ -298,9 +294,49 @@ for w,gii_file in enumerate(med_gii):
                 save_estimates(CV_estimates_filename, estimates_it_CV, 
                             not_nan_vox, orig_num_vert = data.shape[0], model_type = 'gauss')   
 
+            ## NOW DO CSS
+            if model_type=='css':
+
+                print("CSS Grid fit")
+                css_model = CSS_Iso2DGaussianModel(stimulus = prf_stim,
+                                                    filter_predictions = True,
+                                                    filter_type = 'dc',
+                                                    filter_params = {'highpass': True,
+                                                                    'add_mean': True,
+                                                                    'window_length': 201,
+                                                                    'polyorder': 3}
+                                                )
+
+                css_fitter = CSS_Iso2DGaussianFitter(data = masked_data, 
+                                                    model = css_model, 
+                                                    n_jobs = 16,
+                                                    fit_hrf = fit_hrf,
+                                                    previous_gaussian_fitter = gauss_fitter)
+
+                css_fitter.grid_fit(n_grid,
+                                    fixed_grid_baseline = fixed_grid_baseline,
+                                    grid_bounds = [(0,1000)], #only prf amplitudes between 0 and 1000
+                                    rsq_threshold = 0.05)
+
+                # save grid estimates
+                save_estimates(grid_css_estimates_filename, css_fitter.gridsearch_params, 
+                            not_nan_vox, orig_num_vert = data.shape[0], model_type = 'css')
 
 
-            
+                ## ITERATIVE FIT
+                print("CSS Iterative fit")
+
+                gauss_fitter.iterative_fit(rsq_threshold = 0.05, 
+                                        verbose = True,
+                                        bounds = css_bounds,
+                                        xtol = xtol,
+                                        ftol = ftol)
+
+                # save iterative estimates
+                save_estimates(it_css_estimates_filename, css_fitter.iterative_search_params, 
+                            not_nan_vox, orig_num_vert = data.shape[0], model_type = 'css')
+
+      
             
 # Print duration
 end_time = datetime.datetime.now()

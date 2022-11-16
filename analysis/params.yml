@@ -23,7 +23,7 @@ general:
     analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
 
     fitting:
-      where: 'local' #'lisa' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
+      where: 'lisa' #'local' #'lisa' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
 
       cartesius:
         basedir: '/home/inesv/'
@@ -31,8 +31,8 @@ general:
 
       lisa:
         basedir: '/home/inesv/'
-        derivatives: '/scratch/Visuomotor_data/Data/derivatives'
-        data_dir: '/home/inesv/Visuomotor_data'
+        derivatives: '/scratch/Visuomotor_data/derivatives'
+        data_dir: '/project/projects_verissimo/Visuomotor_data'
 
       local:
         basedir: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor'
@@ -135,6 +135,18 @@ fitting:
 
     fit_smooth: False
     extension: 'cropped_dc_psc.func.gii'
+
+    fit_hrf: False #True
+
+    PRF_ITI_in_TR: 0.5
+    bar_pass_in_TRs:
+      empty: 10
+      L-R: 18
+      R-L: 18
+      U-D: 10
+      D-U: 10
+
+    bar_pass_direction: ['empty','U-D','R-L','empty','L-R','D-U','empty'] 
 
   soma:
     fit_smooth: False

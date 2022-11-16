@@ -21,7 +21,7 @@ import cv2
 from skimage.transform import rescale
 from skimage.filters import threshold_triangle
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw
 
 import math
 import cortex
@@ -521,6 +521,135 @@ def shift_DM(prf_dm):
                             avg_prf_dm[avg_end_pos-i,vert_min_pix:vert_max_pix,j]=255
 
     return avg_prf_dm #(x,y,t)
+
+
+def crop_shift_arr(arr, crop_nr = None, shift = 0):
+    
+    """
+    helper function to crop and shift array
+    
+    Parameters
+    ----------
+    arr : array
+       original array
+       assumes time dim is last one (arr.shape[-1])
+    crop_nr : None or int
+        if not none, expects int with number of FIRST time points to crop
+    shift : int
+        positive or negative int, of number of time points to shift (if neg, will shift leftwards)
+        
+    """
+        
+    # if cropping
+    if crop_nr:
+        new_arr = arr[...,crop_nr:]
+    else:
+        new_arr = arr
+        
+    # if shiftting
+    out_arr = new_arr.copy()
+    if shift > 0:
+        out_arr[...,shift:] = new_arr[..., :-int(shift)]
+    elif shift < 0:
+        out_arr[...,:shift] = new_arr[..., np.abs(shift):]
+        
+    return out_arr
+
+
+def make_prf_dm(res_scaling = .1, screen_res = [1680,1050], dm_shape = 'square',
+                bar_width_ratio = 0.125, iti = 0.5,
+                bar_pass_in_TRs = {'empty': 10, 'L-R': 18, 'R-L': 18, 'U-D': 10, 'D-U': 10},
+                bar_pass_direction = ['empty','U-D','R-L','empty','L-R','D-U','empty'],
+                run_lenght_TR = 90, crop_nr = 4, shift = -1):
+
+    """ 
+
+    Make design matrix array for pRF task
+
+    """
+
+    # get array of bar condition label per TR
+    condition_per_TR = []
+    for cond in bar_pass_direction:
+        condition_per_TR += list(np.tile(cond, bar_pass_in_TRs[cond]))
+        
+        if np.ceil(iti)>0: # if ITI in TR, 
+            condition_per_TR += list(np.tile('empty', int(np.ceil(iti))))
+        
+    # drop last TRs, for DM to have same time lenght as data
+    condition_per_TR = condition_per_TR[:run_lenght_TR]
+
+    ## crop and shift if such was the case
+    condition_per_TR = crop_shift_arr(np.array(condition_per_TR)[np.newaxis], 
+                                        crop_nr = crop_nr, shift = shift)[0]
+
+    # all possible positions in pixels for for midpoint of
+    # y position for vertical bar passes, 
+    ver_y = screen_res[1]*np.linspace(0,1, bar_pass_in_TRs['U-D'])#+1)
+    # x position for horizontal bar passes 
+    hor_x = screen_res[0]*np.linspace(0,1, bar_pass_in_TRs['L-R'])#+1)
+
+    # coordenates for bar pass, for PIL Image
+    coordenates_bars = {'L-R': {'upLx': hor_x - 0.5 * bar_width_ratio * screen_res[0], 
+                                'upLy': np.repeat(screen_res[1], bar_pass_in_TRs['L-R']),
+                                'lowRx': hor_x + 0.5 * bar_width_ratio * screen_res[0], 
+                                'lowRy': np.repeat(0, bar_pass_in_TRs['L-R'])},
+                        'R-L': {'upLx': np.array(list(reversed(hor_x - 0.5 * bar_width_ratio * screen_res[0]))), 
+                                'upLy': np.repeat(screen_res[1], bar_pass_in_TRs['R-L']),
+                                'lowRx': np.array(list(reversed(hor_x+ 0.5 * bar_width_ratio * screen_res[0]))), 
+                                'lowRy': np.repeat(0, bar_pass_in_TRs['R-L'])},
+                        'U-D': {'upLx': np.repeat(0, bar_pass_in_TRs['U-D']), 
+                                'upLy': ver_y+0.5 * bar_width_ratio * screen_res[1],
+                                'lowRx': np.repeat(screen_res[0], bar_pass_in_TRs['U-D']), 
+                                'lowRy': ver_y - 0.5 * bar_width_ratio * screen_res[1]},
+                        'D-U': {'upLx': np.repeat(0, bar_pass_in_TRs['D-U']), 
+                                'upLy': np.array(list(reversed(ver_y + 0.5 * bar_width_ratio * screen_res[1]))),
+                                'lowRx': np.repeat(screen_res[0], bar_pass_in_TRs['D-U']), 
+                                'lowRy': np.array(list(reversed(ver_y - 0.5 * bar_width_ratio * screen_res[1])))}
+                        }
+
+    # save screen display for each TR 
+    visual_dm_array = np.zeros((len(condition_per_TR), round(screen_res[1] * res_scaling), round(screen_res[0] * res_scaling)))
+    i = 0
+
+    for trl, bartype in enumerate(condition_per_TR): # loop over bar pass directions
+
+        img = Image.new('RGB', tuple(screen_res)) # background image
+
+        if bartype not in np.array(['empty','empty_long']): # if not empty screen
+
+            #print(bartype)
+
+            # set draw method for image
+            draw = ImageDraw.Draw(img)
+            # add bar, coordinates (upLx, upLy, lowRx, lowRy)
+            draw.rectangle(tuple([coordenates_bars[bartype]['upLx'][i],coordenates_bars[bartype]['upLy'][i],
+                                coordenates_bars[bartype]['lowRx'][i],coordenates_bars[bartype]['lowRy'][i]]), 
+                        fill = (255,255,255),
+                        outline = (255,255,255))
+
+            # increment counter
+            if trl < (len(condition_per_TR) - 1):
+                i = i+1 if condition_per_TR[trl] == condition_per_TR[trl+1] else 0    
+
+        ## save in array
+        visual_dm_array[int(trl):int(trl + 1), ...] = np.array(img)[::round(1/res_scaling),::round(1/res_scaling),0][np.newaxis,...]
+
+    # swap axis to have time in last axis [x,y,t]
+    visual_dm = visual_dm_array.transpose([1,2,0])
+
+    if dm_shape == 'square':
+        ## make it square
+        # add padding (top and bottom borders) 
+        new_visual_dm = np.zeros((round(np.max(screen_res) * res_scaling), round(np.max(screen_res) * res_scaling),
+                                len(condition_per_TR)))
+
+        pad_ind = int(np.ceil((screen_res[0] - screen_res[1])/2 * res_scaling))
+        new_visual_dm[pad_ind:int(visual_dm.shape[0]+pad_ind),:,:] = visual_dm.copy()
+    else:
+        new_visual_dm = visual_dm.copy()
+        
+    return new_visual_dm
 
 
 def join_chunks(path, out_name, hemi, chunk_num = 83, fit_model = 'css'):
