@@ -48,9 +48,11 @@ processing:
   sg_filt_polyorder: 3
   sg_filt_deriv: 0
 
+  first_modes_to_remove: 5 # Number of low-frequency eigenmodes to remove (highpass)
+
   smooth_fwhm: 2
 
-  crop_pRF_TR: 7
+  crop_pRF_TR: 4
 
   regress_conf: False
 
@@ -103,7 +105,7 @@ plotting:
     parietal: ['IPS0','IPS1','IPS2+']
     frontal: ['sPCS','iPCS']
 
-    n_TR: 83 # after cropping (original 90)
+    n_TR: 86 # after cropping (original 90)
 
   soma:
     z_threshold: 3.1 #2.7
@@ -115,7 +117,7 @@ fitting:
   prf:
     fit_model: 'gauss' #'css'
 
-    type: 'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
+    type: 'mean' #'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
 
     min_eccen: 0.2
     max_eccen: 15
@@ -132,13 +134,13 @@ fitting:
     total_chunks: 83
 
     fit_smooth: False
-    extension: 'cropped_sg_psc.func.gii'
+    extension: 'cropped_dc_psc.func.gii'
 
   soma:
     fit_smooth: False
     extension: 'sg_psc.func.gii'
 
-    type: 'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
+    type: 'mean' #'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
 
     all_contrasts:
       face: ['eyebrows',

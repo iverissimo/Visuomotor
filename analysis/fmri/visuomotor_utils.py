@@ -10,7 +10,6 @@ import pandas as pd
 import nibabel as nb
 
 from nilearn import surface
-import nistats
 
 from scipy.signal import savgol_filter
 import nipype.interfaces.freesurfer as fs
@@ -37,6 +36,7 @@ from scipy import ndimage
 from scipy.integrate import trapz
 from scipy import stats
 from scipy import misc
+from scipy import fft
 
 
 def median_gii(files,outdir, run_name='median'):
@@ -67,14 +67,51 @@ def median_gii(files,outdir, run_name='median'):
     median_img = np.median(img, axis = 0)
 
     darrays = [nb.gifti.gifti.GiftiDataArray(d) for d in median_img]
-    median_gii = nb.gifti.gifti.GiftiImage(header = img_load.header,
+    avg_gii = nb.gifti.gifti.GiftiImage(header = img_load.header,
                                            extra = img_load.extra,
                                            darrays = darrays) # need to save as gii again
 
     median_file = os.path.join(outdir,re.sub('run-\d{2}_','run-%s_'%(run_name),os.path.split(files[0])[-1]))
-    nb.save(median_gii,median_file)
+    nb.save(avg_gii,median_file)
 
     return median_file
+
+def mean_gii(files,outdir, run_name='mean'):
+
+    """ make average gii file (over runs)
+
+    Parameters
+    ----------
+    files : List/arr
+        list of absolute filenames to do median over
+    outdir : str
+        path to save new files
+    
+
+    Outputs
+    -------
+    avg_file: str
+        absolute output filename
+    
+    """
+
+
+    img = []
+    for i,filename in enumerate(files):
+        img_load = nb.load(filename)
+        img.append([x.data for x in img_load.darrays]) #(runs,TRs,vertices)
+
+    avg_img = np.mean(img, axis = 0)
+
+    darrays = [nb.gifti.gifti.GiftiDataArray(d) for d in avg_img]
+    avg_gii = nb.gifti.gifti.GiftiImage(header = img_load.header,
+                                           extra = img_load.extra,
+                                           darrays = darrays) # need to save as gii again
+
+    avg_file = os.path.join(outdir,re.sub('run-\d{2}_','run-%s_'%(run_name),os.path.split(files[0])[-1]))
+    nb.save(avg_gii,avg_file)
+
+    return avg_file
 
 
 def crop_gii(gii_path,num_TR,outpath, extension = '.func.gii'):
@@ -187,6 +224,70 @@ def highpass_gii(filename,polyorder,deriv,window,outpth, extension = '.func.gii'
     return filename_sg,filepath_sg
 
 
+def dc_filter_gii(filename, outpth, extension = '.func.gii',
+                                first_modes_to_remove=5):
+    
+    """ 
+    High pass discrete cosine filter array
+    
+    Parameters
+    ----------
+    filename : List/array
+        list of absolute filename for gii file
+    outpth: str
+        path to save new files
+    extension: str
+        file extension
+    first_modes_to_remove: int
+        Number of low-frequency eigenmodes to remove (highpass)
+    
+    Outputs
+    -------
+    filename_filt: arr
+        np array with filtered run
+    filepath_filt: str
+        filtered filename
+    """ 
+
+    outfile = os.path.split(filename)[-1].replace(extension,'_dc'+extension)
+    filepath_filt = os.path.join(outpth,outfile)
+
+    if not os.path.isfile(filename): # check if original file exists
+            print('no file found called %s' %filename)
+            filename_filt = []
+            filepath_filt = []
+
+    elif os.path.isfile(filepath_filt): # if filtered file exists, skip
+        print('File {} already in folder, skipping'.format(filepath_filt))
+        filename_filt = nb.load(filepath_filt)
+        filename_filt = np.array([filename_filt.darrays[i].data for i in range(len(filename_filt.darrays))]) #load surface data
+
+    else:
+        # load with nibabel instead to save outputs always as gii
+        gii_in = nb.load(filename)
+        data = np.array([gii_in.darrays[i].data for i in range(len(gii_in.darrays))]) #load surface data
+
+        print('filtering run %s' %filename)
+
+        # get Discrete Cosine Transform
+        coeffs = fft.dct(data, norm='ortho', axis=0)
+        coeffs[...,:first_modes_to_remove] = 0
+
+        # filter signal
+        filtered_signal = fft.idct(coeffs, norm='ortho', axis=0)
+        # add mean image back to avoid distribution around 0
+        filename_filt = filtered_signal + np.mean(data, axis=0)#[np.newaxis, ...]
+
+        darrays = [nb.gifti.gifti.GiftiDataArray(d) for d in filename_filt]
+        gii_out = nb.gifti.gifti.GiftiImage(header = gii_in.header, extra = gii_in.extra, darrays = darrays)
+
+        filename_filt = np.array(filename_filt)
+        nb.save(gii_out,filepath_filt) # save as gii file
+
+    return filename_filt, filepath_filt
+
+
+
 
 def psc_gii(gii_file,outpth, method='median', extension = '.func.gii'):
 
@@ -238,7 +339,7 @@ def psc_gii(gii_file,outpth, method='median', extension = '.func.gii'):
         elif method == 'median':
             data_m = np.median(data_in, axis=0)
 
-        psc_gii = 100.0 * (data_in - data_m)/data_m#np.abs(data_m)
+        psc_gii = 100.0 * ((data_in - data_m)/np.absolute(data_m))
 
         darrays = [nb.gifti.gifti.GiftiDataArray(d) for d in psc_gii]
         new_gii = nb.gifti.gifti.GiftiImage(header = img_load.header,
