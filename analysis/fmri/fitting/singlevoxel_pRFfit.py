@@ -11,20 +11,16 @@ import glob, yaml
 import sys
 
 import numpy as np
+import cortex
 
 from nilearn import surface
 
 sys.path.append(os.path.split(os.getcwd())[0]) # so script finds utils.py
-from utils import * #import script to use relevante functions
+from visuomotor_utils import make_prf_dm #import script to use relevante functions
 
 # requires pfpy be installed - preferably with python setup.py develop
-from prfpy.rf import *
-from prfpy.timecourse import *
 from prfpy.stimulus import PRFStimulus2D
-from prfpy.grid import Iso2DGaussianGridder,CSS_Iso2DGaussianGridder
-from prfpy.fit import Iso2DGaussianFitter, CSS_Iso2DGaussianFitter
-
-from popeye import utilities
+from prfpy.model import Iso2DGaussianModel, CSS_Iso2DGaussianModel
 
 import matplotlib.pyplot as plt
 
@@ -81,7 +77,7 @@ fit_where = params['general']['paths']['fitting']['where'] # where are we fittin
 
 deriv_pth = params['general']['paths']['fitting'][fit_where]['derivatives'] # path to derivatives folder
 postfmriprep_pth = os.path.join(deriv_pth,'post_fmriprep','prf','sub-{sj}'.format(sj=sj)) # path to post_fmriprep files
-median_pth = os.path.join(postfmriprep_pth,'median') # path to median run files
+median_pth = os.path.join(postfmriprep_pth,'mean') # path to median run files
 
 fits_pth = os.path.join(deriv_pth,'pRF_fit','sub-{sj}'.format(sj=sj)) # path to pRF fits
 # should add here an "if doesn't exist, fit single voxel", at a later stage.
@@ -109,41 +105,22 @@ if roi != 'None':
     roi_ind = cortex.get_roi_verts(params['processing']['space'],roi) # get indices for that ROI
     data = data[roi_ind[roi]]
 
-# load DM and create pRF stim object
-
-# get screenshot pngs
-png_path = os.path.join(os.getcwd(),'prf_stimuli')
-png_filename = [os.path.join(png_path, png) for png in os.listdir(png_path)]
-png_filename.sort()
-
-# set design matrix filename
-dm_filename = os.path.join(os.getcwd(), 'prf_dm_square.npy')
+# create DM and create pRF stim object
 
 # subjects that did pRF task with linux computer, so res was full HD
 HD_subs = [str(num).zfill(2) for num in params['general']['HD_screen_subs']] 
 res = params['general']['screenRes_HD'] if str(sj).zfill(2) in HD_subs else params['general']['screenRes']
 
-# create design matrix
-screenshot2DM(png_filename, 0.1, res, dm_filename, dm_shape = 'square')  # create it
-
-print('computed %s' % (dm_filename))
-
-# actually load DM
-prf_dm = np.load(dm_filename,allow_pickle=True)
-prf_dm = prf_dm.T # then it'll be (x, y, t)
-
-# shift it to be average of every 2TRs DM
-prf_dm = shift_DM(prf_dm)
-
-# crop DM because functional data also cropped 
-prf_dm = prf_dm[:,:,params['processing']['crop_pRF_TR']:]
+## make prf dm (x, y, t)
+prf_dm = make_prf_dm(res_scaling = .1, screen_res = res, dm_shape = 'square',
+                    bar_width_ratio = 0.125, iti = params['fitting']['prf']['PRF_ITI_in_TR'],
+                    bar_pass_in_TRs = params['fitting']['prf']['bar_pass_in_TRs'],
+                    bar_pass_direction = params['fitting']['prf']['bar_pass_direction'],
+                    run_lenght_TR = 90, 
+                    crop_nr = params['processing']['crop_pRF_TR'], shift = -1)
 
 # define model params
 TR = params['general']['TR']
-hrf = spm_hrf(0,TR)
-
-# times where bar is on screen [1st on, last on, 1st on, last on, etc] 
-bar_onset = (np.array([14,22,25,41,55,71,74,82])-params['processing']['crop_pRF_TR'])*TR
 
 
 # make stimulus object, which takes an input design matrix and sets up its real-world dimensions
@@ -152,32 +129,33 @@ prf_stim = PRFStimulus2D(screen_size_cm = params['general']['screen_width'],
                          design_matrix = prf_dm,
                          TR = TR)
 
-# sets up stimulus and hrf for this gaussian gridder
-gg = Iso2DGaussianGridder(stimulus = prf_stim,
-                          hrf = hrf,
-                          filter_predictions = True,
-                          window_length = params['processing']['sg_filt_window_length'],
-                          polyorder = params['processing']['sg_filt_polyorder'],
-                          highpass = True,
-                          add_mean = True,
-                          task_lengths = np.array([prf_dm.shape[-1]]))
+# times where bar is on screen 
+bar_onset = np.unique(np.where(prf_dm != 0)[-1])*TR
 
-# and css gridder
-gg_css = CSS_Iso2DGaussianGridder(stimulus = prf_stim,
-                                  hrf = hrf,
-                                  filter_predictions = True,
-                                  window_length = params['processing']['sg_filt_window_length'],
-                                  polyorder = params['processing']['sg_filt_polyorder'],
-                                  highpass = True,
-                                  add_mean = True,
-                                  task_lengths = np.array([prf_dm.shape[-1]]))
+# define model 
+gauss_model = Iso2DGaussianModel(stimulus = prf_stim,
+                                filter_predictions = True,
+                                filter_type = 'dc',
+                                filter_params = {'highpass': True,
+                                                'add_mean': True,
+                                                'window_length': 201,
+                                                'polyorder': 3}
+                                        )
 
-
+# and css model
+css_model = CSS_Iso2DGaussianModel(stimulus = prf_stim,
+                                    filter_predictions = True,
+                                    filter_type = 'dc',
+                                    filter_params = {'highpass': True,
+                                                    'add_mean': True,
+                                                    'window_length': 201,
+                                                    'polyorder': 3}
+                                    )
 
 # Load pRF estimates 
 
 # models to get single voxel and compare fits
-models = ['gauss','iterative_gauss','css']
+models = ['gauss','iterative_gauss','css', 'iterative_css']
 
 for _,model in enumerate(models): # run through each model
     
@@ -215,11 +193,11 @@ for _,model in enumerate(models): # run through each model
     timeseries = data[vertex]
         
     if model == 'css':
-        model_fit = gg_css.return_single_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
+        model_fit = gg_css.return_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
                                                     masked_estimates['size'][vertex], masked_estimates['beta'][vertex],
                                                     masked_estimates['baseline'][vertex], masked_estimates['ns'][vertex])
     else:
-        model_fit = gg.return_single_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
+        model_fit = gg.return_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
                                                 masked_estimates['size'][vertex], masked_estimates['beta'][vertex],
                                                 masked_estimates['baseline'][vertex])
 
@@ -242,12 +220,9 @@ for _,model in enumerate(models): # run through each model
     else:
         plt.title('vertex %d of ROI %s , rsq of %s fit is %.3f' %(vertex, roi, model, masked_estimates['rsq'][vertex]))
         
-
     # plot axis vertical bar on background to indicate stimulus display time
-    ax_count = 0
-    for h in range(4):
-        plt.axvspan(bar_onset[ax_count], bar_onset[ax_count+1]+TR, facecolor='r', alpha=0.1)
-        ax_count += 2
+    for h in bar_onset:
+        plt.axvspan(h, h+TR, facecolor='r', alpha=0.1)
 
     plt.legend(loc=0)
 
