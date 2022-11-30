@@ -16,7 +16,7 @@ import cortex
 from nilearn import surface
 
 sys.path.append(os.path.split(os.getcwd())[0]) # so script finds utils.py
-from visuomotor_utils import make_prf_dm #import script to use relevante functions
+from visuomotor_utils import make_prf_dm, join_chunks, mask_estimates #import script to use relevante functions
 
 # requires pfpy be installed - preferably with python setup.py develop
 from prfpy.stimulus import PRFStimulus2D
@@ -155,7 +155,7 @@ css_model = CSS_Iso2DGaussianModel(stimulus = prf_stim,
 # Load pRF estimates 
 
 # models to get single voxel and compare fits
-models = ['gauss','iterative_gauss','css', 'iterative_css']
+models = ['gauss']#,'iterative_gauss','css']#, 'iterative_css']
 
 for _,model in enumerate(models): # run through each model
     
@@ -167,7 +167,7 @@ for _,model in enumerate(models): # run through each model
         gii_file = [x for _,x in enumerate(med_filenames) if field in x][0]
         estimates_combi = os.path.split(gii_file)[-1].replace(params['processing']['extension'],'_'+model+'_estimates.npz')
     
-        estimates_pth = os.path.join(fits_pth,model)
+        estimates_pth = os.path.join(fits_pth,model,'mean')
  
         if os.path.isfile(os.path.join(estimates_pth,estimates_combi)): # if combined estimates exists
             
@@ -193,11 +193,11 @@ for _,model in enumerate(models): # run through each model
     timeseries = data[vertex]
         
     if model == 'css':
-        model_fit = gg_css.return_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
+        model_fit = css_model.return_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
                                                     masked_estimates['size'][vertex], masked_estimates['beta'][vertex],
                                                     masked_estimates['baseline'][vertex], masked_estimates['ns'][vertex])
     else:
-        model_fit = gg.return_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
+        model_fit = gauss_model.return_prediction(masked_estimates['x'][vertex], masked_estimates['y'][vertex],
                                                 masked_estimates['size'][vertex], masked_estimates['beta'][vertex],
                                                 masked_estimates['baseline'][vertex])
 
