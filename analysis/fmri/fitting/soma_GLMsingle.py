@@ -87,7 +87,8 @@ for run_id in run_num_list:
 # get trial condition labels
 stim_labels = [op.splitext(val)[0] for val in params['fitting']['soma']['soma_stimulus'] ]
 # get unique labels of conditions
-cond_unique = np.unique(stim_labels)
+_, idx = np.unique(stim_labels, return_index=True) #np.unique(stim_labels)
+cond_unique = np.array(stim_labels)[np.sort(idx)]
 
 # get trial timings, in TR
 # initial baseline period
