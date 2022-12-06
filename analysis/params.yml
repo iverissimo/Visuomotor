@@ -150,7 +150,7 @@ fitting:
 
   soma:
 
-    glm_single_hrf: 'hrf_canonical'
+    glm_single_hrf: 'hrf_canonical' # 'hrf_fit'
 
     fit_smooth: False
     extension: 'sg_psc.func.gii'

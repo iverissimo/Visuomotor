@@ -93,7 +93,7 @@ cond_unique = np.unique(stim_labels)
 # initial baseline period
 start_baseline_dur = int(np.round(params['fitting']['soma']['empty_dur_in_sec']/TR)) # rounding up, will compensate by shifting hrf onset
 # trial duration (including ITIs)
-trial_dur = (params['fitting']['soma']['iti_in_sec']+params['fitting']['soma']['stim_dur_in_sec']+params['fitting']['soma']['iti_in_sec'])/TR
+trial_dur = (params['fitting']['soma']['iti_in_sec'] * 2 + params['fitting']['soma']['stim_dur_in_sec'])/TR
 
 ## define DM [TR, conditions]
 # initialize at 0
@@ -118,11 +118,15 @@ for run_id in run_num_list:
 opt = dict()
 
 # set important fields for completeness (but these would be enabled by default)
-opt['wantlibrary'] = 0
+if params['fitting']['soma']['glm_single_hrf'] == 'hrf_canonical': # if we want canonical hrf, turn hrf fitting off
+    opt['wantlibrary'] = 0
+else:
+    opt['wantlibrary'] = 1
 opt['wantglmdenoise'] = 1
 opt['wantfracridge'] = 1
 
-opt['hrfonset'] = -.5 * TR #FAM_FA.hrf_onset
+# shift onset by remainder, to make start point accurate
+opt['hrfonset'] = -(params['fitting']['soma']['empty_dur_in_sec'] % TR) 
 
 #opt['hrftoassume'] = hrf_final
 #opt['brainexclude'] = final_mask.astype(int) #prf_mask.astype(int)
