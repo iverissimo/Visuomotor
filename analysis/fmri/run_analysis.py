@@ -31,7 +31,7 @@ CLI.add_argument("--system",
                 help = 'Where are we running analysis? (ex: local, lisa). Default local'
                 )
 
-CLI.add_argument("--exclude_sj",  # name on the CLI - drop the `--` for positional/required parameters
+CLI.add_argument("--exclude",  # name on the CLI - drop the `--` for positional/required parameters
                 nargs="*",  # 0 or more values expected => creates a list
                 type=int,
                 default=[],  # default if nothing is provided
@@ -49,9 +49,9 @@ CLI.add_argument("--cmd",
 args = CLI.parse_args()
 
 # access CLI options
-sj = args.subject
+sj = args.subject[0] if len(args.subject) == 1 else args.subject # for situation where 1 sj vs list
 system_dir = args.system
-exclude_sj = args.exclude_sj
+exclude_sj = args.exclude
 py_cmd = args.cmd
 
 ## Load MRI object
@@ -60,7 +60,6 @@ Visuomotor_data = MRIData(params, sj,
                         exclude_sj = exclude_sj)
 
 ## Run specific command
-
 if py_cmd == 'postfmriprep':
 
     Visuomotor_data.post_fmriprep_proc()
