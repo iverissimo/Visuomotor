@@ -16,70 +16,49 @@ general:
   tasks: ['prf','soma']
 
   paths:
-    data: 
-      sourcedata: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/sourcedata'
-      derivatives: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/derivatives'
+    local:
+      root: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data'
+    lisa:
+      root: '/project/projects_verissimo/Visuomotor_data'
 
-    analysis: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor/analysis'
+prf:
+  PRF_ITI_in_TR: 0.5
+  bar_pass_in_TRs:
+    empty: 10
+    L-R: 18
+    R-L: 18
+    U-D: 10
+    D-U: 10
 
-    fitting:
-      where: 'local' #'lisa' #'local' #'lisa' #'cartesius' # where to fit, name of machine to get paths from (as specified below)
+  bar_pass_direction: ['empty','U-D','R-L','empty','L-R','D-U','empty'] 
 
-      cartesius:
-        basedir: '/home/inesv/'
-        derivatives: '/home/inesv/Visuomotor/Data/derivatives'
+soma:
+  event_dur_in_sec:
+    iti: .5
+    empty: 12
+    stim: 2.25
 
-      lisa:
-        basedir: '/home/inesv/'
-        derivatives: '/scratch/Visuomotor_data/derivatives'
-        data_dir: '/project/projects_verissimo/Visuomotor_data'
-
-      local:
-        basedir: '/Users/verissimo/Documents/Projects/Visuomotor_prefrontal/Visuomotor'
-        derivatives: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data/derivatives'
-
+  trial_order: ['iti','stim', 'iti']
 
 processing:
-
   space: 'fsaverage' #'T1w'
-  extension: '.func.gii'
+  file_ext: '.func.gii'
+
+  crop_TR: 
+    soma: 0
+    prf: 4
+
+  filter:
+    soma: 'sg'
+    prf: 'dc'
+
+  first_modes_to_remove: 5 # Number of low-frequency eigenmodes to remove (highpass)
 
   sg_filt_window_length: 81
   sg_filt_polyorder: 3
   sg_filt_deriv: 0
 
-  first_modes_to_remove: 5 # Number of low-frequency eigenmodes to remove (highpass)
-
   smooth_fwhm: 2
-
-  crop_pRF_TR: 4
-
-  regress_conf: False
-
-  nuisance_columns: ['csf',
-                    'white_matter',
-                    'global_signal',
-                    'std_dvars',
-                    'dvars',
-                    'framewise_displacement',
-                    't_comp_cor_00',
-                    't_comp_cor_01',
-                    't_comp_cor_02',
-                    't_comp_cor_03',
-                    't_comp_cor_04',
-                    't_comp_cor_05',
-                    'a_comp_cor_00',
-                    'a_comp_cor_01',
-                    'a_comp_cor_02',
-                    'a_comp_cor_03',
-                    'a_comp_cor_04',
-                    'a_comp_cor_05',
-                    'trans_x',
-                    'trans_y',
-                    'trans_z',
-                    'rot_x',
-                    'rot_x',
-                    'rot_z']
 
 eyetracking:
 
@@ -93,7 +72,7 @@ eyetracking:
 plotting:
 
   prf:
-    rsq_threshold: 0.17 #0.14 #0.17
+    rsq_threshold: 0.17 #0.14 
 
     n_bins: 10
     min_ecc: 0.25
@@ -138,29 +117,12 @@ fitting:
 
     fit_hrf: False #True
 
-    PRF_ITI_in_TR: 0.5
-    bar_pass_in_TRs:
-      empty: 10
-      L-R: 18
-      R-L: 18
-      U-D: 10
-      D-U: 10
-
-    bar_pass_direction: ['empty','U-D','R-L','empty','L-R','D-U','empty'] 
-
   soma:
 
     glm_single_hrf: 'hrf_canonical' # 'hrf_fit'
 
     fit_smooth: False
     extension: 'sg_psc.func.gii'
-
-    iti_in_sec: .5
-    empty_dur_in_sec: 12
-    stim_dur_in_sec: 2.25
-
-    trial_order: ['iti','stim', 'iti']
-
 
     type: 'mean' #'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
 
