@@ -10,7 +10,7 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
     params = yaml.safe_load(f_in)
 
 from preproc_mridata import MRIData
-
+from soma_model import GLMsingle_Model
 
 # defined command line options
 # this also generates --help and error handling
@@ -63,3 +63,12 @@ Visuomotor_data = MRIData(params, sj,
 if py_cmd == 'postfmriprep':
 
     Visuomotor_data.post_fmriprep_proc()
+
+elif py_cmd == 'fit_glmsingle':
+
+    data_model = GLMsingle_Model(Visuomotor_data)
+
+    ## loop over all subjects 
+    for pp in Visuomotor_data.sj_num:
+        data_model.fit_data(pp)
+
