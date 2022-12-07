@@ -273,6 +273,10 @@ class GLMsingle_Model(somaModel):
                         end_time = end_time,
                         dur  = end_time - start_time))
 
+        ## save opt for easy access later (and consistency)
+        print('Saving opts dict')
+        np.save(op.join(out_dir, 'OPTS.npy'), opt)
+
         ## save some plots for sanity check
         flatmap = cortex.Vertex(results_glmsingle['typed']['R2'], 
                         self.MRIObj.sj_space,
@@ -304,4 +308,36 @@ class GLMsingle_Model(somaModel):
         print('saving %s' %fig_name)
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
-                                                        
+    def load_results_dict(self, participant, fits_dir = None, load_opts = False):
+
+        """ helper function to 
+        load glm single model estimates
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        # path to estimates
+        if fits_dir is None:
+            fits_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            'hrf_{h}'.format(h = self.glm_single_ops['hrf']))
+
+        ## load existing file outputs if they exist
+        results_glmsingle = dict()
+        results_glmsingle['typea'] = np.load(op.join(fits_dir,'TYPEA_ONOFF.npy'),allow_pickle=True).item()
+        results_glmsingle['typeb'] = np.load(op.join(fits_dir,'TYPEB_FITHRF.npy'),allow_pickle=True).item()
+        results_glmsingle['typec'] = np.load(op.join(fits_dir,'TYPEC_FITHRF_GLMDENOISE.npy'),allow_pickle=True).item()
+        results_glmsingle['typed'] = np.load(op.join(fits_dir,'TYPED_FITHRF_GLMDENOISE_RR.npy'),allow_pickle=True).item()
+
+        ## if we saved fit params, load them too
+        if load_opts:
+            opt = np.load(op.join(fits_dir, 'OPTS.npy'))
+            return results_glmsingle, opt
+        
+        else:
+            return results_glmsingle
+
+
+
