@@ -12,6 +12,8 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
 from preproc_mridata import MRIData
 from soma_model import GLMsingle_Model
 
+from viewer import somaViewer
+
 # defined command line options
 # this also generates --help and error handling
 CLI = argparse.ArgumentParser()
@@ -71,4 +73,20 @@ elif py_cmd == 'fit_glmsingle':
     ## loop over all subjects 
     for pp in Visuomotor_data.sj_num:
         data_model.fit_data(pp)
+
+elif py_cmd == 'plot_tc':
+
+    data_model = GLMsingle_Model(Visuomotor_data)
+
+    plotter = somaViewer(data_model)
+
+    vertex = ''
+    while len(vertex) == 0:
+        vertex = input("Vertex number to plot?: ")
+
+    plotter.plot_glmsingle_tc(Visuomotor_data.sj_num[0], int(vertex))
+
+
+
+
 
