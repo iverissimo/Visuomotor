@@ -10,6 +10,8 @@ from nilearn import surface
 import datetime
 
 from glmsingle.glmsingle import GLM_single
+from glmsingle.ols.make_poly_matrix import make_polynomial_matrix, make_projection_matrix
+
 import cortex
 
 class somaModel:
@@ -181,6 +183,116 @@ class GLMsingle_Model(somaModel):
         return all_dm
 
     
+    def average_betas_per_cond(self, single_trial_betas):
+
+        """
+        helper function to average obtained beta values 
+        for each condition and run
+        
+        Parameters
+        ----------
+        single_trial_betas: arr
+            single trial betas for all runs [vertex, betas*runs]         
+        """
+
+        # number of single trials
+        nr_sing_trial = len(self.soma_stim_labels)
+
+        # number of runs fitted
+        num_runs = int(single_trial_betas.shape[-1]/nr_sing_trial)
+
+        # where we store condition betas [runs, vertex, cond]
+        avg_betas_cond = np.zeros((num_runs, single_trial_betas.shape[0], len(self.soma_cond_unique)))
+
+        # iterate over runs
+        for run_ind in np.arange(num_runs): 
+
+            # beta values for run
+            betas_run = single_trial_betas[..., 
+                                            int(run_ind * nr_sing_trial):int(nr_sing_trial + run_ind * nr_sing_trial)]
+
+            # for each unique condition
+            for i, cond_name in enumerate(self.soma_cond_unique):
+
+                # find indices where condition happens in trial
+                ind_c = [ind for ind, name in enumerate(self.soma_stim_labels) if name == cond_name]
+
+                # average beta values for that condition, and store
+                avg_beta = np.mean(betas_run[..., ind_c], axis = -1)
+                avg_betas_cond[run_ind,:, i] = avg_beta
+
+        return avg_betas_cond
+
+    def get_nuisance_matrix(self, maxpolydeg, pcregressors = None, pcnum = 1, nr_TRs = 141):
+
+        """
+        helper function to construct projection matrices 
+        for the nuisance components
+        
+        Parameters
+        ----------
+        maxpolydeg: list
+            list with ints which represent 
+            polynomial degree to use for polynomial nuisance functions [runs, poly] 
+        pcregressors: list
+            list with pcregressors to add to nuisance matrix [runs, TR, nr_pcregs]
+        pcnum: int
+            number of pc regressors to actually use
+        nr_TRs: int
+            number of TRs in run
+               
+        """
+        # if we didnt add pcregressors, just make list of None
+        if pcregressors is None:
+            extra_regressors_all = [None for r in range(np.array(maxpolydeg).shape[0])] # length of nr of runs
+        else:
+            extra_regressors_all = [pcregressors[r][:, :pcnum] for r in range(np.array(maxpolydeg).shape[0])]
+
+        # construct projection matrices for the nuisance components
+        polymatrix = []
+        combinedmatrix = []
+        
+        for p in range(np.array(maxpolydeg).shape[0]): # for each run
+
+            # this projects out polynomials
+            pmatrix = make_polynomial_matrix(nr_TRs,
+                                            maxpolydeg[p])
+            polymatrix.append(make_projection_matrix(pmatrix))
+
+            extra_regressors = extra_regressors_all[p]
+
+            # this projects out both of them
+            if extra_regressors is not None:
+                if extra_regressors.any():
+                    combinedmatrix.append(
+                        make_projection_matrix(
+                            np.c_[pmatrix, extra_regressors]
+                        )
+                    )
+            else:
+                combinedmatrix.append(
+                    make_projection_matrix(pmatrix))
+
+        return polymatrix, combinedmatrix
+
+    def get_hrf_tc(self, hrf_library, hrf_index):
+
+        """
+        helper function to make hrf timecourse
+        for all surface vertex
+        
+        Parameters
+        ----------
+        hrf_library: arr
+            hrf library that was used in fit
+        hrf_index: arr
+            hrf index for each vertex  
+        """
+        hrf_surf = [hrf_library[:,ind_hrf] for ind_hrf in hrf_index]
+        return np.vstack(hrf_surf)
+
+
+
     def fit_data(self, participant):
 
         """ function to fit glm single model to participant data
