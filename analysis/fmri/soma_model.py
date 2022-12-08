@@ -234,11 +234,12 @@ class GLMsingle_Model(somaModel):
 
         #opt['hrftoassume'] = hrf_final
         #opt['brainexclude'] = final_mask.astype(int) #prf_mask.astype(int)
-        #opt['brainthresh'] = [99, 0] # which allows all voxels to pass the intensity threshold
         #opt['brainR2'] = 100
 
-        # trying out defining polinomials to use
-        #opt['maxpolydeg'] = [[0, 1] for _ in range(data.shape[0])]
+        opt['brainthresh'] = [99, 0] # which allows all voxels to pass the intensity threshold
+
+        # limit polynomials used, to only intercept and linear slope
+        opt['maxpolydeg'] = [[0, 1] for _ in range(np.array(all_data).shape[0])]
 
         # for the purpose of this example we will keep the relevant outputs in memory
         # and also save them to the disk
@@ -277,36 +278,77 @@ class GLMsingle_Model(somaModel):
         print('Saving opts dict')
         np.save(op.join(out_dir, 'OPTS.npy'), opt)
 
-        ## save some plots for sanity check
+        ## save some plots for sanity check ##
+
+        ## MODEL D
+        # CV-rsq
         flatmap = cortex.Vertex(results_glmsingle['typed']['R2'], 
                         self.MRIObj.sj_space,
-                        vmin = 0, vmax = 80, #.7,
+                        vmin = 0, vmax = 80, 
                         cmap='hot')
-
         #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+
         fig_name = op.join(out_dir, 'modeltypeD_rsq.png')
         print('saving %s' %fig_name)
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
+        # Frac value
         flatmap = cortex.Vertex(results_glmsingle['typed']['FRACvalue'], 
                         self.MRIObj.sj_space,
-                        vmin = 0, vmax = 1, #.7,
+                        vmin = 0, vmax = 1, 
                         cmap='copper')
-
         #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+
         fig_name = op.join(out_dir, 'modeltypeD_fracridge.png')
         print('saving %s' %fig_name)
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
+        # Average betas 
         flatmap = cortex.Vertex(np.mean(results_glmsingle['typed']['betasmd'], axis = -1), 
                         self.MRIObj.sj_space,
-                        vmin = -3, vmax = 3, #.7,
+                        vmin = -3, vmax = 3, 
                         cmap='RdBu_r')
-
         #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+
         fig_name = op.join(out_dir, 'modeltypeD_avgbetas.png')
         print('saving %s' %fig_name)
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+        # Noise pool
+        flatmap = cortex.Vertex(results_glmsingle['typed']['noisepool'], 
+                  self.MRIObj.sj_space,
+                   vmin = 0, vmax = 1, #.7,
+                   cmap='hot')
+        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+
+        fig_name = op.join(out_dir, 'modeltypeD_noisepool.png')
+        print('saving %s' %fig_name)
+        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+        ## MODEL A
+        # RSQ
+        flatmap = cortex.Vertex(results_glmsingle['typea']['onoffR2'], 
+                        self.MRIObj.sj_space,
+                        vmin = 0, vmax = 50, #.7,
+                        cmap='hot')
+        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+
+        fig_name = op.join(out_dir, 'modeltypeA_ONOFF_rsq.png')
+        print('saving %s' %fig_name)
+        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+        # Betas
+        flatmap = cortex.Vertex(results_glmsingle['typea']['betasmd'][...,0], 
+                        self.MRIObj.sj_space,
+                        vmin = -2, vmax = 2, 
+                        cmap='RdBu_r')
+        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+
+        fig_name = op.join(out_dir, 'modeltypeA_ONOFF_betas.png')
+        print('saving %s' %fig_name)
+        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+
 
     def load_results_dict(self, participant, fits_dir = None, load_opts = False):
 
@@ -333,7 +375,8 @@ class GLMsingle_Model(somaModel):
 
         ## if we saved fit params, load them too
         if load_opts:
-            opt = np.load(op.join(fits_dir, 'OPTS.npy'))
+            opt = dict()
+            opt = np.load(op.join(fits_dir, 'OPTS.npy'), allow_pickle=True).item()
             return results_glmsingle, opt
         
         else:
