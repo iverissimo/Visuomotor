@@ -12,6 +12,8 @@ import datetime
 from glmsingle.glmsingle import GLM_single
 from glmsingle.ols.make_poly_matrix import make_polynomial_matrix, make_projection_matrix
 
+import scipy
+
 import cortex
 
 class somaModel:
@@ -146,7 +148,7 @@ class GLMsingle_Model(somaModel):
     def get_dm_glmsing(self, nr_TRs = 141, nr_runs = 1):
 
         """
-        helper function to make glmsingle DM for all runs
+        make glmsingle DM for all runs
         
         Parameters
         ----------
@@ -182,11 +184,11 @@ class GLMsingle_Model(somaModel):
 
         return all_dm
 
-    
+
     def average_betas_per_cond(self, single_trial_betas):
 
         """
-        helper function to average obtained beta values 
+        average obtained beta values 
         for each condition and run
         
         Parameters
@@ -226,7 +228,7 @@ class GLMsingle_Model(somaModel):
     def get_nuisance_matrix(self, maxpolydeg, pcregressors = None, pcnum = 1, nr_TRs = 141):
 
         """
-        helper function to construct projection matrices 
+        construct projection matrices 
         for the nuisance components
         
         Parameters
@@ -278,7 +280,7 @@ class GLMsingle_Model(somaModel):
     def get_hrf_tc(self, hrf_library, hrf_index):
 
         """
-        helper function to make hrf timecourse
+        make hrf timecourse
         for all surface vertex
         
         Parameters
@@ -291,11 +293,106 @@ class GLMsingle_Model(somaModel):
         hrf_surf = [hrf_library[:,ind_hrf] for ind_hrf in hrf_index]
         return np.vstack(hrf_surf)
 
+    def get_prediction_tc(self, dm, hrf_tc, betas, psc_tc=False, combinedmatrix=None, meanvol=None):
+
+        """
+        get prediction timecourse for vertex
+        
+        Parameters
+        ----------
+        dm: arr
+            design matrix [TR, nr_cond]
+        hrf_tc: arr
+            hrf timecourse for vertex
+        betas: arr
+            beta values for vertex [nr_cond]
+        psc_tc: bool
+            if we want to percent signal change predicted timecourse
+        combinedmatrix: arr
+            nuisance component matrix - NOTE! If we want to psc accurately, combinedmatrix should NOT have intercept
+        meanvol: float
+            mean volume for vertex
+        """
+        # convolve HRF into design matrix
+        design0 = scipy.signal.convolve2d(dm, hrf_tc[..., np.newaxis])[0:dm.shape[0],:]  
+
+        # predicted timecourse is design times betas from fit
+        prediction = design0 @ betas if psc_tc == True else design0 @ betas/100 * meanvol
+
+        # denoise
+        if combinedmatrix is not None:
+            prediction = combinedmatrix.astype(np.float32) @ prediction
+
+        return prediction
+
+    def get_denoised_data(self, participant, maxpolydeg = [], pcregressors = None, pcnum = 1,
+                                            run_ID = None, psc_tc = False):
+
+        """
+        get denoised data 
+        (this is, taking into account nuisance regressors glsingle uses during fit)
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID  
+        maxpolydeg: list
+            list with ints which represent 
+            polynomial degree to use for polynomial nuisance functions [runs, poly] 
+        pcregressors: list
+            list with pcregressors to add to nuisance matrix [runs, TR, nr_pcregs]
+        pcnum: int
+            number of pc regressors to actually use
+        run_ID: int
+            run identifier, if we only want to load and denoise specific run
+            NOTE! in this case, expects input of pcregressors and maxpoly for that run 
+        psc_tc: bool
+            if we want to percent signal change predicted timecourse
+    
+        """
+
+        ## get list with gii files
+        gii_filenames = self.get_soma_file_list(participant, 
+                              file_ext = 'hemi-L{ext}'.format(ext = self.MRIObj.file_ext)) + \
+                        self.get_soma_file_list(participant, 
+                                    file_ext = 'hemi-R{ext}'.format(ext = self.MRIObj.file_ext))
+        
+        ## if we want a specific run, filter
+        if run_ID is not None:
+            gii_filenames = [file for file in gii_filenames if 'run-{r}'.format(r = str(run_ID).zfill(2)) in file]
+
+        ## load data of all runs
+        all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
+
+        ## get nuisance matrix
+        # if we want PSC data, then dont remove intercept (mean vol)
+        if psc_tc == True:
+            maxpolydeg = [[val for val in r_list if val != 0] for r_list in maxpolydeg]
+
+        combinedmatrix = self.get_nuisance_matrix(maxpolydeg,
+                                                pcregressors = pcregressors,
+                                                pcnum = pcnum,
+                                                nr_TRs = np.array(all_data).shape[-1])[-1]
+        ## denoise data
+        data_out = [] 
+        for r, cm in enumerate(combinedmatrix):
+
+            data_denoised = cm.astype(np.float32) @ np.transpose(all_data[r])
+
+            if psc_tc == True:
+                mean_signal = data_denoised.mean(axis = 0)[np.newaxis, ...]
+                data_psc = (data_denoised - mean_signal)/np.absolute(mean_signal)
+                data_psc *= 100
+                data_out.append(data_psc) 
+            else:
+                data_out.append(data_denoised) 
+
+        return data_out
 
 
     def fit_data(self, participant):
 
-        """ function to fit glm single model to participant data
+        """ fit glm single model to participant data
         
         Parameters
         ----------
