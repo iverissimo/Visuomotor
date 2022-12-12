@@ -142,10 +142,16 @@ fitting:
                   'rhand_fing2',
                   'rhand_fing3',
                   'rhand_fing4',
-                  'rhand_fing5']
+                  'rhand_fing5',
+                  'bhand_fing1',
+                  'bhand_fing2',
+                  'bhand_fing3',
+                  'bhand_fing4',
+                  'bhand_fing5']
 
       lower_limb: ['lleg',
-                  'rleg']
+                  'rleg',
+                  'bleg']
 
     soma_stimulus: ['eyebrows.avi',
                     'eyes.avi',

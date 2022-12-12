@@ -1216,60 +1216,6 @@ def leave_one_out(input_list):
 
 
 
-def set_contrast(dm_col,tasks,contrast_val=[1],num_cond=1):
-    
-    """ define contrast matrix
-
-    Parameters
-    ----------
-    dm_col : list/arr
-        design matrix columns (all possible task names in list)
-    tasks : list/arr
-        list with list of tasks to give contrast value
-        if num_cond=1 : [tasks]
-        if num_cond=2 : [tasks1,tasks2], contrast will be tasks1 - tasks2     
-    contrast_val : list/arr 
-        list with values for contrast
-        if num_cond=1 : [value]
-        if num_cond=2 : [value1,value2], contrast will be tasks1 - tasks2
-    num_cond : int
-        if one task vs the implicit baseline (1), or if comparing 2 conditions (2)
-
-    Outputs
-    -------
-    contrast : list/arr
-        contrast array
-
-    """
-    
-    contrast = np.zeros(len(dm_col))
-
-    if num_cond == 1: # if only one contrast value to give ("task vs implicit intercept")
-
-        for j,name in enumerate(tasks[0]):
-            for i in range(len(contrast)):
-                if dm_col[i] == name:
-                    contrast[i] = contrast_val[0]
-
-    elif num_cond == 2: # if comparing 2 conditions (task1 - task2)
-
-        for k,lbl in enumerate(tasks):
-            idx = []
-            for i,val in enumerate(lbl):
-                idx.extend(np.where([1 if val == label else 0 for _,label in enumerate(dm_col)])[0])
-
-            val = contrast_val[0] if k==0 else contrast_val[1] # value to give contrast
-
-            for j in range(len(idx)):
-                for i in range(len(dm_col)):
-                    if i==idx[j]:
-                        contrast[i]=val
-
-    print('contrast for %s is %s'%(tasks,contrast))
-    return contrast
-
-
-
 def compute_stats(voxel, dm, contrast, betas, pvalue = 'oneside'):
     
     """ compute statistis for GLM

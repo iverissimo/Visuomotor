@@ -116,6 +116,124 @@ class somaModel:
 
         return all_data
 
+    def set_contrast(self, dm_col, tasks, contrast_val = [1], num_cond = 1):
+    
+        """ define contrast matrix
+
+        Parameters
+        ----------
+        dm_col : list/arr
+            design matrix columns (all possible task names in list)
+        tasks : list/arr
+            list with list of tasks to give contrast value
+            if num_cond=1 : [tasks]
+            if num_cond=2 : [tasks1,tasks2], contrast will be tasks1 - tasks2     
+        contrast_val : list/arr 
+            list with values for contrast
+            if num_cond=1 : [value]
+            if num_cond=2 : [value1,value2], contrast will be tasks1 - tasks2
+        num_cond : int
+            if one task vs the implicit baseline (1), or if comparing 2 conditions (2)
+
+        Outputs
+        -------
+        contrast : list/arr
+            contrast array
+
+        """
+        contrast = np.zeros(len(dm_col))
+
+        if num_cond == 1: # if only one contrast value to give ("task vs implicit intercept")
+
+            for j,name in enumerate(tasks[0]):
+                for i in range(len(contrast)):
+                    if dm_col[i] == name:
+                        contrast[i] = contrast_val[0]
+
+        elif num_cond == 2: # if comparing 2 conditions (task1 - task2)
+
+            for k,lbl in enumerate(tasks):
+                idx = []
+                for i,val in enumerate(lbl):
+                    idx.extend(np.where([1 if val == label else 0 for _,label in enumerate(dm_col)])[0])
+
+                val = contrast_val[0] if k==0 else contrast_val[1] # value to give contrast
+
+                for j in range(len(idx)):
+                    for i in range(len(dm_col)):
+                        if i==idx[j]:
+                            contrast[i]=val
+
+        print('contrast for %s is %s'%(tasks,contrast))
+        return contrast
+
+    def design_variance(self, X, which_predictor=[]):
+        
+        """Returns the design variance of a predictor (or contrast) in X.
+
+        Parameters
+        ----------
+        X : numpy array
+            Array of shape (N, P)
+        which_predictor : list/array
+            contrast-vector of the predictors you want the design var from.
+
+        Outputs
+        -------
+        des_var : float
+            Design variance of the specified predictor/contrast from X.
+        """
+
+        idx = np.array(which_predictor) != 0
+
+        c = np.zeros(X.shape[1])
+        c[idx] = which_predictor[idx]
+        des_var = c.dot(np.linalg.pinv(X.T.dot(X))).dot(c.T)
+
+        return des_var
+
+    def calc_contrast_stats(self, betas = [], contrast = [], 
+                                sse = None, df = None, design_var = None, pval_1sided = True):
+
+        """Calculates stats for a given contrast and beta values
+        
+        Parameters
+        ----------
+        betas : arr
+            array of bata values
+        contrast: arr/list
+            contrast vector       
+        sse: float
+            sum of squared errors between model prediction and data
+        df: int
+            degrees of freedom (timepoints - predictores)   
+        design_var: float
+            design variance 
+        pval_1sided: bool
+            if we want one or two sided p-value
+
+        """
+        # t statistic for vertex
+        t_val = contrast.dot(betas) / np.sqrt((sse/df) * design_var)
+
+        if pval_1sided == True:
+            # compute the p-value (right-tailed)
+            p_val = scipy.stats.t.sf(t_val, df) 
+
+            # z-score corresponding to certain p-value
+            z_score = scipy.stats.norm.isf(np.clip(p_val, 1.e-300, 1. - 1.e-16)) # deal with inf values of scipy
+        else:
+            # take the absolute by np.abs(t)
+            p_val = scipy.stats.t.sf(np.abs(t_val), df) * 2 # multiply by two to create a two-tailed p-value
+
+            # z-score corresponding to certain p-value
+            z_score = scipy.stats.norm.isf(np.clip(p_val/2, 1.e-300, 1. - 1.e-16)) # deal with inf values of scipy
+
+        return t_val,p_val,z_score
+
+
+
+
 
 class GLMsingle_Model(somaModel):
 
@@ -309,7 +427,7 @@ class GLMsingle_Model(somaModel):
         psc_tc: bool
             if we want to percent signal change predicted timecourse
         combinedmatrix: arr
-            nuisance component matrix - NOTE! If we want to psc accurately, combinedmatrix should NOT have intercept
+            nuisance component matrix 
         meanvol: float
             mean volume for vertex
         """
@@ -366,8 +484,8 @@ class GLMsingle_Model(somaModel):
 
         ## get nuisance matrix
         # if we want PSC data, then dont remove intercept (mean vol)
-        if psc_tc == True:
-            maxpolydeg = [[val for val in r_list if val != 0] for r_list in maxpolydeg]
+        # if psc_tc == True:
+        #     maxpolydeg = [[val for val in r_list if val != 0] for r_list in maxpolydeg]
 
         combinedmatrix = self.get_nuisance_matrix(maxpolydeg,
                                                 pcregressors = pcregressors,
@@ -380,8 +498,8 @@ class GLMsingle_Model(somaModel):
             data_denoised = cm.astype(np.float32) @ np.transpose(all_data[r])
 
             if psc_tc == True:
-                mean_signal = data_denoised.mean(axis = 0)[np.newaxis, ...]
-                data_psc = (data_denoised - mean_signal)/np.absolute(mean_signal)
+                mean_signal = all_data[r].mean(axis = -1)[np.newaxis, ...] #data_denoised.mean(axis = 0)[np.newaxis, ...]
+                data_psc = data_denoised/np.absolute(mean_signal) #(data_denoised - mean_signal)/np.absolute(mean_signal)
                 data_psc *= 100
                 data_out.append(data_psc) 
             else:
@@ -593,3 +711,53 @@ class GLMsingle_Model(somaModel):
 
 
 
+    def get_tc_stats(self, data_tc, betas, contrast = [], dm_run = [], hrf_tc = [], 
+                            psc_tc = False, combinedmatrix = None, meanvol = None, pval_1sided = True):
+
+        """ function to calculate the contrast statistics
+        for a specific timecourse
+        
+        Parameters
+        ----------
+        data_tc: arr
+            vertex timecourse     
+        betas: arr
+            beta values for vertex    
+        contrast: arr/list
+            contrast vector
+        dm_run: arr
+            design matrix for run [TR, cond] (not convolved)
+        hrf_tc: arr
+            hrf timecourse for vertex
+        psc_tc: bool
+            if we want to percent signal change predicted timecourse
+        combinedmatrix: arr
+            nuisance component matrix - NOTE! If we want to psc accurately, combinedmatrix should NOT have intercept
+        meanvol: float
+            mean volume for vertex
+
+        """
+
+        # convolve dm with hrf of vertex
+        dm_conv = scipy.signal.convolve2d(dm_run, hrf_tc[..., np.newaxis])[0:dm_run.shape[0],:]  
+
+        # calculate design variance
+        design_var = self.design_variance(dm_conv, contrast)
+
+        # get prediction timecourse
+        prediction = self.get_prediction_tc(dm_run, hrf_tc, betas,
+                                            psc_tc = psc_tc,
+                                            combinedmatrix = combinedmatrix,
+                                            meanvol = meanvol)
+
+        # sum of squared errors
+        sse = ((data_tc - prediction) ** 2).sum() 
+
+        # degrees of freedom = N - P = timepoints - predictores
+        df = (dm_conv.shape[0] - dm_conv.shape[1])
+
+        t_val, p_val, z_score = self.calc_contrast_stats(betas = betas, 
+                                                contrast = contrast, sse = sse, df = df, 
+                                                design_var = design_var, pval_1sided = pval_1sided)
+
+        return t_val, p_val, z_score
