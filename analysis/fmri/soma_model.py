@@ -237,10 +237,7 @@ class somaModel:
 
         return t_val,p_val,z_score
 
-
-
-
-
+    
 class GLMsingle_Model(somaModel):
 
     def __init__(self, MRIObj, outputdir = None):
@@ -516,7 +513,6 @@ class GLMsingle_Model(somaModel):
 
         return data_out
 
-
     def fit_data(self, participant):
 
         """ fit glm single model to participant data
@@ -684,7 +680,6 @@ class GLMsingle_Model(somaModel):
         print('saving %s' %fig_name)
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
-
     def load_results_dict(self, participant, fits_dir = None, load_opts = False):
 
         """ helper function to 
@@ -716,7 +711,6 @@ class GLMsingle_Model(somaModel):
         
         else:
             return results_glmsingle
-
 
     def get_tc_stats(self, data_tc, betas, contrast = [], dm_run = [], hrf_tc = [], 
                             psc_tc = False, combinedmatrix = None, meanvol = None, pval_1sided = True):
@@ -768,7 +762,6 @@ class GLMsingle_Model(somaModel):
                                                 design_var = design_var, pval_1sided = pval_1sided)
 
         return t_val, p_val, z_score
-
 
     def compute_roi_stats(self, participant, z_threshold = 3.1):
 
@@ -926,3 +919,131 @@ class GLMsingle_Model(somaModel):
                         start_time = start_time,
                         end_time = end_time,
                         dur  = end_time - start_time))
+
+
+class somaRF_Model(GLMsingle_Model):
+
+    def __init__(self, MRIObj, outputdir = None):
+        
+        """__init__
+        constructor for class 
+        
+        Parameters
+        ----------
+        MRIObj : MRIData object
+            object from one of the classes defined in processing.load_exp_data
+        outputdir: str or None
+            path to general output directory            
+        """
+
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
+
+        # if output dir not defined, then make it in derivatives
+        if outputdir is None:
+            self.outputdir = op.join(self.MRIObj.derivatives_pth, 'somaRF_fits')
+        else:
+            self.outputdir = outputdir
+    
+    def gauss1D_cart(self, x, mu=0.0, sigma=1.0):
+        
+        """gauss1D_cart
+        gauss1D_cart takes a 1D array x, a mean and standard deviation,
+        and produces a gaussian with given parameters, with a peak of height 1.
+        Parameters
+        ----------
+        x : numpy.ndarray (1D)
+            space on which to calculate the gauss
+        mu : float, optional
+            mean/mode of gaussian (the default is 0.0)
+        sigma : float, optional
+            standard deviation of gaussian (the default is 1.0)
+        Returns
+        -------
+        numpy.ndarray
+            gaussian values at x
+        """
+
+        return np.exp(-((x-mu)**2)/(2*sigma**2))
+    
+    
+    def create_grid_predictions(self, grid_centers, grid_sizes, reg_names = [], design_matrix = []):
+
+        """ 
+            create grid prediction timecourses
+
+        Parameters
+        ----------
+        grid_centers: arr
+            grid array with center positions for RF
+        grid_sizes: arr
+            grid array with RF sizes
+        reg_names: list/arr
+            regressor names (cond)
+        design_matrix: design matrix [TR, cond]
+
+        """
+
+        # all combinations of center position and size for grid values given
+        self.grid_mus, self.grid_sizes = np.meshgrid(grid_centers, grid_sizes)
+
+        ## create grid RFs
+        grid_rfs = self.gauss1D_cart(np.arange(len(reg_names))[..., np.newaxis], 
+                        mu = self.grid_mus.ravel(), 
+                        sigma = self.grid_sizes.ravel())
+
+        ## get regressor indices
+        reg_inds = [ind for ind, name in enumerate(self.soma_cond_unique) if name in reg_names]
+
+        ## multiply DM by gauss function
+        grid_prediction = design_matrix[..., reg_inds] @ grid_rfs 
+
+        return grid_prediction # [TR, nr predictions] 
+
+
+    def find_best_pred(self, pred_arr, data_tc):
+
+        """ 
+            computes best-fit rsq and slope for vertex 
+            (assumes baseline is 0)
+
+        Parameters
+        ----------
+        pred_arr: arr
+            (grid) prediction array [TR, nr predictions]
+        data_tc: arr
+            data timecourse
+
+        """
+
+        # find least-squares solution to a linear matrix equation
+        grid_fits = [scipy.linalg.lstsq(pred_arr[...,i][...,np.newaxis], data_tc)[:2] for i in range(pred_arr.shape[-1])]
+        grid_fits = np.vstack(grid_fits)
+
+        # best prediction is one that minimizes residuals
+        best_pred_ind = np.nanargmin(grid_fits[...,-1])
+
+        # get slope and residual of best fitting prediction
+        slope = grid_fits[best_pred_ind][0][0]
+        resid = grid_fits[best_pred_ind][-1]
+
+        # calculate r2 = (1 - residual / (n * y.var()))
+        r2 = np.nan_to_num(1 - (resid / (data_tc.shape[0] * data_tc.var())))
+
+        return best_pred_ind, slope, r2
+
+
+    def get_grid_params(self, grid_predictions, betas_vert, design_matrix = [], reg_inds = []):
+        
+        
+        # from betas make vertex "timecourse"
+        vert_tc = design_matrix[..., reg_inds].dot(betas_vert[reg_inds])
+
+        # first find best grid prediction for vertex
+        best_pred_ind, slope, r2 = self.find_best_pred(grid_predictions, vert_tc)
+
+        # return grid params in dict
+        return {'mu': self.grid_mus.ravel()[best_pred_ind],
+                'size': self.grid_sizes.ravel()[best_pred_ind],
+                'slope': slope,
+                'r2': r2}

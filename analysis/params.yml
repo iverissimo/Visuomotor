@@ -40,6 +40,8 @@ soma:
 
   trial_order: ['iti','stim', 'iti']
 
+  n_TR: 141
+
 processing:
   space: 'fsaverage' #'T1w'
   file_ext: '.func.gii'
@@ -86,8 +88,6 @@ plotting:
 
     n_TR: 86 # after cropping (original 90)
 
-  soma:
-    n_TR: 141
 
 
 fitting:
@@ -123,7 +123,7 @@ fitting:
     extension: 'sg_psc.func.gii'
 
     z_threshold: 3.1 #2.7
-    
+
     type: 'mean' #'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
 
     all_contrasts:
