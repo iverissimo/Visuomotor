@@ -74,6 +74,14 @@ elif py_cmd == 'fit_glmsingle':
     for pp in Visuomotor_data.sj_num:
         data_model.fit_data(pp)
 
+elif py_cmd == 'stats_glmsingle':
+
+    data_model = GLMsingle_Model(Visuomotor_data)
+
+    ## loop over all subjects 
+    for pp in Visuomotor_data.sj_num:
+        data_model.compute_roi_stats(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
+
 elif py_cmd == 'plot_tc':
 
     data_model = GLMsingle_Model(Visuomotor_data)

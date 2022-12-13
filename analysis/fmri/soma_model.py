@@ -12,9 +12,15 @@ import datetime
 from glmsingle.glmsingle import GLM_single
 from glmsingle.ols.make_poly_matrix import make_polynomial_matrix, make_projection_matrix
 
+from visuomotor_utils import leave_one_out
+
 import scipy
 
 import cortex
+
+from joblib import Parallel, delayed
+from tqdm import tqdm
+
 
 class somaModel:
 
@@ -482,6 +488,9 @@ class GLMsingle_Model(somaModel):
         ## load data of all runs
         all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
 
+        ## get run ID list for bookeeping
+        self.run_list = self.get_run_list(gii_filenames)
+
         ## get nuisance matrix
         # if we want PSC data, then dont remove intercept (mean vol)
         # if psc_tc == True:
@@ -676,7 +685,6 @@ class GLMsingle_Model(somaModel):
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
 
 
-
     def load_results_dict(self, participant, fits_dir = None, load_opts = False):
 
         """ helper function to 
@@ -708,7 +716,6 @@ class GLMsingle_Model(somaModel):
         
         else:
             return results_glmsingle
-
 
 
     def get_tc_stats(self, data_tc, betas, contrast = [], dm_run = [], hrf_tc = [], 
@@ -761,3 +768,161 @@ class GLMsingle_Model(somaModel):
                                                 design_var = design_var, pval_1sided = pval_1sided)
 
         return t_val, p_val, z_score
+
+
+    def compute_roi_stats(self, participant, z_threshold = 3.1):
+
+        """ 
+            compute statistics for GLM single
+            to localize general face, hand and leg region 
+            and for left vs right regions
+
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        # print start time, for bookeeping
+        start_time = datetime.datetime.now()
+
+        ## outdir will be fits dir, which depends on our HRF approach
+        out_dir = op.join(self.MRIObj.derivatives_pth, 'glmsingle_stats',
+                                            'sub-{sj}'.format(sj = participant), 
+                                            'hrf_{h}'.format(h = self.glm_single_ops['hrf']))
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
+        ## load estimates and fitting options
+        results_glmsingle, fit_opts = self.load_results_dict(participant,
+                                                            load_opts = True)
+
+        ## Load PSC data for all runs
+        data_psc = self.get_denoised_data(participant,
+                                                maxpolydeg = fit_opts['maxpolydeg'],
+                                                pcregressors = results_glmsingle['typed']['pcregressors'],
+                                                pcnum = results_glmsingle['typed']['pcnum'],
+                                                run_ID = None,
+                                                psc_tc = True)
+
+        ## get hrf for all vertices
+        hrf_surf = self.get_hrf_tc(fit_opts['hrflibrary'], 
+                                    results_glmsingle['typed']['HRFindex'])
+
+        ## make design matrix
+        all_dm = self.get_dm_glmsing(nr_TRs = np.array(data_psc).shape[1], 
+                                   nr_runs = np.array(data_psc).shape[0])
+
+        ## get average beta per condition
+        avg_betas = self.average_betas_per_cond(results_glmsingle['typed']['betasmd'])
+
+        ## get nuisance matrix
+        combinedmatrix = self.get_nuisance_matrix(fit_opts['maxpolydeg'],
+                                               pcregressors = results_glmsingle['typed']['pcregressors'],
+                                               pcnum = results_glmsingle['typed']['pcnum'],
+                                               nr_TRs = np.array(data_psc).shape[1])[-1]
+
+        # now make simple contrasts
+        print('Computing simple contrasts')
+        print('Using z-score of %0.2f as threshold for localizer' %z_threshold)
+
+
+        reg_keys = list(self.MRIObj.params['fitting']['soma']['all_contrasts'].keys())
+        reg_keys.sort() # list of key names (of different body regions)
+
+        loo_keys = leave_one_out(reg_keys) # loo for keys 
+
+        # one broader region vs all the others
+        for index,region in enumerate(reg_keys): 
+
+            print('contrast for %s ' %region)
+
+            # list of other contrasts
+            other_contr = np.append(self.MRIObj.params['fitting']['soma']['all_contrasts'][loo_keys[index][0]],
+                                    self.MRIObj.params['fitting']['soma']['all_contrasts'][loo_keys[index][1]])
+
+            contrast = self.set_contrast(self.soma_cond_unique, 
+                                    [self.MRIObj.params['fitting']['soma']['all_contrasts'][str(region)], other_contr],
+                                [1,-len(self.MRIObj.params['fitting']['soma']['all_contrasts'][str(region)])/len(other_contr)],
+                                num_cond=2)
+
+            ## loop over runs
+            run_stats = {}
+
+            for run_ind, run_ID in enumerate(self.run_list):
+
+                # set filename
+                stats_filename = op.join(out_dir, 'stats_run-{rid}_{reg}_vs_all_contrast.npy'.format(rid = run_ID,
+                                                                                                    reg = region))
+
+                # compute contrast-related statistics
+                soma_stats = Parallel(n_jobs=16)(delayed(self.get_tc_stats)(data_psc[run_ind][..., vert], 
+                                                                        beta_vert, contrast = contrast, 
+                                                                        dm_run = all_dm[run_ind], hrf_tc = hrf_surf[vert],
+                                                                        psc_tc = True, combinedmatrix = combinedmatrix[run_ind], 
+                                                                        meanvol = results_glmsingle['typed']['meanvol'][vert], 
+                                                                        pval_1sided = True) for vert, beta_vert in enumerate(tqdm(avg_betas[run_ind])))
+                soma_stats = np.vstack(soma_stats) # t_val, p_val, zscore
+
+                run_stats[run_ID] = {}
+                run_stats[run_ID]['t_val'] = soma_stats[..., 0]
+                run_stats[run_ID]['p_val'] = soma_stats[..., 1]
+                run_stats[run_ID]['zscore'] = soma_stats[..., 2]
+
+                print('saving %s'%stats_filename)
+                np.save(stats_filename, run_stats[run_ID])
+
+            ## now do rest of the contrasts within region (if lateralized) ###
+
+            if region != 'face':
+
+                # compare left and right
+                print('Right vs Left contrasts')
+
+                if region == 'upper_limb':
+                    limbs = ['hand', self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb']]
+                else:
+                    limbs = ['leg', self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb']]
+                            
+                rtask = [s for s in limbs[-1] if 'r'+limbs[0] in s]
+                ltask = [s for s in limbs[-1] if 'l'+limbs[0] in s]
+                tasks = [rtask,ltask] # list with right and left elements
+                            
+                contrast = self.set_contrast(self.soma_cond_unique,
+                                                tasks, [1, -1], num_cond=2)
+
+                ## loop over runs
+                for run_ind, run_ID in enumerate(self.run_list):
+
+                    # set filename
+                    stats_filename = op.join(out_dir, 'stats_run-{rid}_{reg}_RvsL_contrast.npy'.format(rid = run_ID,
+                                                                                                    reg = region))
+
+                    # mask data - only significant voxels for region
+                    region_ind = np.where((run_stats[run_ID]['zscore'] >= z_threshold))[0]
+
+                    # compute contrast-related statistics
+                    LR_stats = Parallel(n_jobs=16)(delayed(self.get_tc_stats)(data_psc[run_ind][..., vert], 
+                                                                            avg_betas[run_ind][vert], contrast = contrast, 
+                                                                            dm_run = all_dm[run_ind], hrf_tc = hrf_surf[vert],
+                                                                            psc_tc = True, combinedmatrix = combinedmatrix[run_ind], 
+                                                                            meanvol = results_glmsingle['typed']['meanvol'][vert], 
+                                                                            pval_1sided = True) for vert in tqdm(region_ind))
+                    LR_stats = np.vstack(LR_stats) # t_val, p_val, zscore
+
+                    ## fill it for surface
+                    LR_soma_stats = np.zeros((run_stats[run_ID]['zscore'].shape[0], LR_stats.shape[-1]))
+                    LR_soma_stats[:] = np.nan
+                    LR_soma_stats[region_ind,:] = LR_stats
+
+                    print('saving %s'%stats_filename)
+                    np.save(stats_filename, {'t_val': LR_soma_stats[..., 0],
+                                            'p_val': LR_soma_stats[..., 1],
+                                            'zscore': LR_soma_stats[..., 2]})
+
+        # Print duration
+        end_time = datetime.datetime.now()
+        print("\nStart time:\t{start_time}\nEnd time:\t{end_time}\nDuration:\t{dur}".format(
+                        start_time = start_time,
+                        end_time = end_time,
+                        dur  = end_time - start_time))
