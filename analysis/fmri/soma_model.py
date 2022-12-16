@@ -18,6 +18,7 @@ from visuomotor_utils import leave_one_out
 import scipy
 
 import cortex
+import matplotlib.pyplot as plt
 
 from joblib import Parallel, delayed
 from tqdm import tqdm
@@ -316,6 +317,121 @@ class somaModel:
 
         if return_RGBA:
             return atlas_rgb_dict
+
+    def get_roi_vert(self, roi_df, roi_list = [], hemi = 'BH'):
+
+        """
+        get vertex indices for an ROI, given an ROI df (usually for atlas, but not necessarily)
+        and a list of labels
+        for a specific hemisphere (or both)
+        
+        Parameters
+        ----------
+        roi_df: pd DataFrame
+            dataframe with all ROIs names, hemispheres and vertices
+        roi_list: list
+            list of strings with ROI labels to load
+        hemi: str
+            which hemisphere (LH, RH or BH - both)
+        """
+
+        roi_vert = []
+
+        for roi2plot in roi_list:
+            if hemi == 'BH':
+                roi_vert += list(roi_df[roi_df['ROI'] == roi2plot].merge_vertex.values.astype(int))
+            else:
+                roi_vert += list(roi_df[(roi_df['ROI'] == roi2plot) & \
+                                (roi_df['hemisphere'] == hemi[0])].merge_vertex.values.astype(int))
+
+        return np.array(roi_vert)
+
+    def transform_roi_coords(self, orig_coords, fig_pth = None, roi_name = ''):
+
+        """
+        Use PCA to rotate x,y ROI coordinates along major axis (usually y)
+        Note - Assumes we are providing ROI from 1 hemisphere only
+        
+        Parameters
+        ----------
+        orig_coords: arr
+            x,y coordinate array for ROI [2, vertex]
+        fig_pth: str
+            if provided, will plot some sanity check plots and save in absolute dir
+        """
+
+        ## center the coordinates (to have zero mean)
+        roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
+                                        orig_coords[1] - np.mean(orig_coords[1])))
+
+        ## get covariance matrix and eigen vector and values
+        cov = np.cov(roi_coord_zeromean)
+        evals, evecs = np.linalg.eig(cov)
+
+        # Sort eigenvalues in decreasing order
+        sort_indices = np.argsort(evals)[::-1]
+        x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
+        x_v2, y_v2 = evecs[:, sort_indices[1]]
+
+        # rotate
+        theta = np.arctan((x_v1)/(y_v1))  
+        rotation_mat = np.matrix([[np.cos(theta), -np.sin(theta)],
+                                    [np.sin(theta), np.cos(theta)]])
+        transformed_mat = rotation_mat * roi_coord_zeromean
+
+        # get transformed coordenates
+        x_transformed, y_transformed = transformed_mat.A
+        roi_coord_transformed = np.vstack((x_transformed, y_transformed))
+
+        if fig_pth is not None:
+            
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+
+            # plot zero centered ROI and major axis 
+            fig, axes = plt.subplots(1,3, figsize=(18,4))
+
+            axes[0].scatter(orig_coords[0], orig_coords[1])
+            axes[0].axis('equal')
+            axes[0].set_title('ROI original coords')
+            
+            scale = 20
+            axes[1].plot([x_v1*-scale*2, x_v1*scale*2],
+                        [y_v1*-scale*2, y_v1*scale*2], color='red')
+            axes[1].plot([x_v2*-scale, x_v2*scale],
+                        [y_v2*-scale, y_v2*scale], color='blue')
+            axes[1].scatter(roi_coord_zeromean[0],
+                            roi_coord_zeromean[1])
+            axes[1].axis('equal')
+            axes[1].set_title('ROI zero mean + major axis')
+
+            axes[2].plot(roi_coord_zeromean[0],
+                        roi_coord_zeromean[1], 'b.', alpha=.1)
+            axes[2].plot(roi_coord_transformed[0],
+                        roi_coord_transformed[1], 'g.')
+            axes[2].axis('equal')
+            axes[2].set_title('ROI rotated')
+
+            fig.savefig(op.join(fig_pth, 'ROI_PCA_%s.png'%roi_name))
+
+        return roi_coord_transformed
+
+    def get_fs_coords(self, pysub = 'fsaverage', merge = True):
+
+        """
+        get freesurfer surface mesh coordinates
+        """
+
+        ## FreeSurfer surface file format: Contains a brain surface mesh in a binary format
+        # Such a mesh is defined by a list of vertices (each vertex is given by its x,y,z coords) 
+        # and a list of faces (each face is given by three vertex indices)
+
+        #left, right = cortex.db.get_surf(params['processing']['space'], 'flat', merge=False)
+        pts, polys = cortex.db.get_surf(pysub, 'flat', merge=True)
+
+        return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
+
+
 
 
 class GLMsingle_Model(somaModel):
