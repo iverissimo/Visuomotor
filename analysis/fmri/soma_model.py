@@ -6,6 +6,7 @@ import pandas as pd
 
 import glob
 from nilearn import surface
+import nibabel as nib
 
 import datetime
 
@@ -237,7 +238,86 @@ class somaModel:
 
         return t_val,p_val,z_score
 
+    def get_atlas_roi_df(self, annot_pth = None, hemi_labels = {'lh': 'L', 'rh': 'R'}, 
+                                base_str = 'HCP-MMP1.annot', hemi_vert_num = 163842, return_RGBA = False):
+
+        """
+        Get all atlas ROI labels and vertex indices, for both hemispheres
+        and return it as pandas DF
+
+        Assumes Glasser atlas (2016), might generalize to others in the future
+        
+        Parameters
+        ----------
+        annot_pth: str
+            absolute path to atlas annotation files
+        hemi_labels: dict
+            key value pair of hemi labels (key: label for annot file, value: hemisphere label we will use later)
+        base_str: str
+            base name for annotation file
+        hemi_vert_num: int
+            number of vertices in one hemisphere (for bookeeping)  
+        return_RGBA: bool
+            if we want to return rgbt(a) as used in Glasser atlas figures, for each vertex
+        """
+
+        if annot_pth is None:
+            annot_pth = op.join(self.MRIObj.derivatives_pth, 'Glasser_et_al_2016_HCP_MMP1.0_qN_RVVG',
+                            'HCP_PhaseTwo', 'Q1-Q6_RelatedParcellation210','MNINonLinear','fsaverage_LR32k')
+
+        # make empty rgb dict (although we might not use it)
+        atlas_rgb_dict = {'R': [], 'G': [], 'B': [], 'A': []}
+
+        # fill atlas dataframe per hemi
+        atlas_df = pd.DataFrame({'ROI': [], 'hemi_vertex': [], 'merge_vertex': [], 'hemisphere': []})
+
+        for hemi in hemi_labels.keys():
+            
+            # get annotation file for hemisphere
+            annotfile = [op.join(annot_pth,x) for x in os.listdir(annot_pth) if base_str in x and hemi in x][0]
+            print('Loading annotations from %s'%annotfile)
+
+            # read annotation file, save:
+            # labels - annotation id at each vertex.
+            # ctab - RGBT + label id colortable array.
+            # names - The names of the labels
+            h_labels, h_ctab, h_names = nib.freesurfer.io.read_annot(annotfile)
+
+            # get labels as strings
+            label_inds_names = [[ind, re.split('_', str(name))[1]] for ind,name in enumerate(h_names) if '?' not in str(name)]
     
+            # fill df for each hemi roi
+            for hemi_roi in label_inds_names:
+                
+                # vertice indices for that roi in that hemisphere
+                hemi_roi_verts = np.where((h_labels == hemi_roi[0]))[0]
+                # and for full surface
+                surf_roi_verts = hemi_roi_verts + hemi_vert_num if hemi_labels[hemi] == 'R' else hemi_roi_verts
+                
+                atlas_df = pd.concat((atlas_df,
+                                    pd.DataFrame({'ROI': np.tile(hemi_roi[-1], len(hemi_roi_verts)), 
+                                                'hemi_vertex': hemi_roi_verts, 
+                                                'merge_vertex': surf_roi_verts, 
+                                                'hemisphere': np.tile(hemi_labels[hemi], len(hemi_roi_verts))})
+                                    
+                                    ),ignore_index=True)
+
+            # if we want RGB + A save values, 
+            # scaled to go from 0-1 (for pycortex plotting) and to have alpha and not T
+            if return_RGBA:
+                for _,lbl in enumerate(h_labels):
+                    atlas_rgb_dict['R'].append(h_ctab[lbl,0]/255) 
+                    atlas_rgb_dict['G'].append(h_ctab[lbl,1]/255) 
+                    atlas_rgb_dict['B'].append(h_ctab[lbl,2]/255) 
+                    atlas_rgb_dict['A'].append((255 - h_ctab[lbl,3])/255) 
+                
+        # allow to be used later one
+        self.atlas_df = atlas_df
+
+        if return_RGBA:
+            return atlas_rgb_dict
+
+
 class GLMsingle_Model(somaModel):
 
     def __init__(self, MRIObj, outputdir = None):

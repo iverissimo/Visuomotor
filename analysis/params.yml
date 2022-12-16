@@ -88,7 +88,24 @@ plotting:
 
     n_TR: 86 # after cropping (original 90)
 
+  soma:
+    glasser_rois:
+      M1: ['4'] # primary motor cortex (Brodmann area 4)
+      S1: ['3a', '3b', '1', '2'] #['3b'] #['3a', '3b', '1'] # primary sensory cortex (Brodman area 3) 
+      SMA: ['6mp', '6ma', 'SCEF'] # supplementary motor areas?
+      CingMA: ['24dd', '24dv'] # cingulate motor cortex
+      sPMC: ['6d', '6a'] # superior premotor areas
+      iPMC: ['6v', '6r'] # inferior premotor areas
+      others: ['FEF', 'PEF', '55b']
 
+    gross_regions: # as defined in the SG creatures paper (2020)
+      parietal: ['3a', '3b', '1', '2', 'PFt', 'PFop', 'AIP', '7PC', 
+                '7AL', 'LIPv', 'VIP', '7Am', 'PF', '7PL', 'MIP']
+      frontal: ['4', '6d', '6mp', '6v', 'FEF', '6a', '6ma', '6r', '55b', 'PEF']
+      medial: ['5m', '5L', '24dd', '5mv', 'SCEF', '24dv', '23c', 'p24pr']
+      operculum_insular: ['43', 'OP1', 'OP4', 'PFcm', 'FOP1', 'OP2‐3',
+                          'RI', 'FOP2', 'FOP3', 'Ig', 'A1', 'PSL', 'LBelt',
+                          'PBelt', 'A4', 'Pol1', 'Pol2', '52']
 
 fitting:
   prf:
