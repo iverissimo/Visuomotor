@@ -42,6 +42,73 @@ class somaViewer:
         plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['font.sans-serif'] = 'Helvetica'
 
+        # pycortex subject to use
+        self.pysub = pysub
+
+    def plot_glasser_rois(self):
+
+        """
+        plot glasser atlas with specific color scheme for each ROI
+        """
+
+        fig_pth = op.join(self.outputdir, 'glasser_atlas')
+        # if output path doesn't exist, create it
+        os.makedirs(fig_pth, exist_ok = True)
+
+        # get ROI color map
+        atlas_rgb_dict = self.somaModelObj.get_atlas_roi_df(return_RGBA = True)
+
+        # plot flatmap
+        glasser = cortex.VertexRGB(np.array(atlas_rgb_dict['R']),
+                           np.array(atlas_rgb_dict['G']), 
+                           np.array(atlas_rgb_dict['B']),
+                           alpha = np.array(atlas_rgb_dict['A']),
+                           subject = self.pysub)
+
+        #cortex.quickshow(glasser,with_curvature=True,with_sulci=True,with_colorbar=False)
+        filename = op.join(fig_pth, 'glasser_flatmap.png')
+        print('saving %s' %filename)
+        _ = cortex.quickflat.make_png(filename, glasser, recache=True,
+                                        with_colorbar=False,with_curvature=True,with_sulci=True)
+
+        # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+        cutout_name = 'zoom_roi_left'
+        _ = cortex.quickflat.make_figure(glasser,
+                                        with_curvature=True,
+                                        with_sulci=True,
+                                        with_roi=True,
+                                        with_colorbar=False,
+                                        cutout=cutout_name,height=2048)
+        filename = op.join(fig_pth, cutout_name+'_glasser_flatmap.png')
+        print('saving %s' %filename)
+        _ = cortex.quickflat.make_png(filename, glasser, recache=True,
+                                        with_colorbar=False,with_curvature=True,with_sulci=True)
+
+        # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+        cutout_name = 'zoom_roi_right'
+        _ = cortex.quickflat.make_figure(glasser,
+                                        with_curvature=True,
+                                        with_sulci=True,
+                                        with_roi=True,
+                                        with_colorbar=False,
+                                        cutout=cutout_name,height=2048)
+        filename = op.join(fig_pth, cutout_name+'_glasser_flatmap.png')
+        print('saving %s' %filename)
+        _ = cortex.quickflat.make_png(filename, glasser, recache=True,
+                                        with_colorbar=False,with_curvature=True,with_sulci=True)
+
+        # save inflated 3D screenshots 
+        cortex.export.save_3d_views(glasser, 
+                            base_name = op.join(fig_pth,'3D_glasser'),
+                            list_angles = ['lateral_pivot', 'medial_pivot', 'left', 'right', 'top', 'bottom',
+                                       'left'],
+                            list_surfaces = ['inflated', 'inflated', 'inflated', 'inflated','inflated','inflated',
+                                          'flatmap'],
+                            viewer_params=dict(labels_visible=[],
+                                               overlays_visible=['rois','sulci']),
+                            size=(1024 * 4, 768 * 4), trim=True, sleep=60)
+
+
 
     def plot_glmsingle_tc(self, participant, vertex, psc_tc = True):
 
