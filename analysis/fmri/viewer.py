@@ -109,7 +109,6 @@ class somaViewer:
                             size=(1024 * 4, 768 * 4), trim=True, sleep=60)
 
 
-
     def plot_glmsingle_tc(self, participant, vertex, psc_tc = True):
 
         """
@@ -192,3 +191,178 @@ class somaViewer:
             axis.legend(handles,labels,loc='upper left',fontsize=15)   
 
             fig.savefig(op.join(fig_pth,'vertex-%i_runIndex-%i_timeseries.png'%(vertex, run_ind)), dpi=100,bbox_inches = 'tight')
+
+
+    def plot_betas_roi_hexabins(self, betas_arr, roi_coords, roi_vertices = None,
+                                    regs2plot = [], hemi_labels = ['LH', 'RH'], fig_name = '', vmin=-2, vmax=2):
+
+        """
+        plot ROI hexabins with beta values per regressor, 
+        for a sanity check of how they look
+        """
+        
+        fig_pth = op.join(self.outputdir, 'betas_ROI_hexabins')
+        # if output path doesn't exist, create it
+        os.makedirs(fig_pth, exist_ok = True)
+
+        # indices for regressors for interest
+        reg_ind = [np.where((self.somaModelObj.soma_cond_unique == name))[0][0] for name in regs2plot]
+
+        # make figure
+        # row is hemisphere, columns regressor
+        fig, axs = plt.subplots(len(hemi_labels), len(reg_ind), sharey=True, figsize=(18,8))
+
+        for hi, hemi in enumerate(hemi_labels):
+            
+            # get betas for vertices of that ROI and hemisphere
+            if roi_vertices is not None:
+                reg_betas = betas_arr[..., reg_ind][roi_vertices[hemi]]
+            else:
+                if isinstance(betas_arr,dict):
+                    reg_betas = betas_arr[hemi][..., reg_ind]
+                else:
+                    reg_betas = betas_arr[..., reg_ind]
+
+            for ind, reg_name in enumerate(regs2plot):
+                
+                if len(hemi_labels) > 1:
+                    sc = axs[hi][ind].hexbin(roi_coords[hemi][0], 
+                                            roi_coords[hemi][1], 
+                                            C = reg_betas[...,ind], 
+                                            reduce_C_function = np.mean,
+                                            cmap = 'RdBu_r',
+                                            gridsize = (50,50), vmin=vmin, vmax=vmax)
+                    #axs[hi][ind].set_xlim((-20,20))
+                    axs[hi][ind].axis('equal')
+                    axs[hi][ind].set_title(reg_name)
+                else:
+                    sc = axs[ind].hexbin(roi_coords[hemi][0], 
+                                            roi_coords[hemi][1], 
+                                            C = reg_betas[...,ind], 
+                                            reduce_C_function = np.mean,
+                                            cmap = 'RdBu_r',
+                                            gridsize = (50,50), vmin=vmin, vmax=vmax)
+                    #axs[ind].set_xlim((-20,20))
+                    axs[ind].axis('equal')
+                    axs[ind].set_title(reg_name)
+
+        fig.colorbar(sc, ax=axs[:, len(reg_ind)-1]) if len(hemi_labels) > 1 else fig.colorbar(sc)
+
+        fig.savefig(op.join(fig_pth, fig_name), dpi=100,bbox_inches = 'tight')
+
+    def plot_glmsingle_roi_betas(self, participant_list, all_rois = {'M1': ['4'], 'S1': ['3b']}):
+
+        """
+        Plot betas for an ROI, for one participant or group
+
+        """
+
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
+        ## get surface x and y coordinates
+        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+                                                                        merge = True)
+
+        ## load betas per participant
+        avg_betas_all = []
+
+        for pp in participant_list:
+
+            ## load estimates and fitting options
+            results_glmsingle, fit_opts = self.somaModelObj.load_results_dict(pp, load_opts = True)
+
+            # get run design matrix
+            # (assumes all runs the same)
+            run_dm = self.somaModelObj.get_dm_glmsing(nr_TRs = self.somaModelObj.MRIObj.params['soma']['n_TR'], 
+                                                        nr_runs = 1)[0]
+
+            ## get average beta per condition
+            avg_betas_runs = self.somaModelObj.average_betas_per_cond(results_glmsingle['typed']['betasmd'])
+
+            ## average across runs
+            avg_betas = np.mean(avg_betas_runs, axis = 0)
+
+            ## append for pp in list
+            avg_betas_all.append(avg_betas[np.newaxis,...])
+
+        avg_betas_all = np.vstack(avg_betas_all) if len(participant_list) > 1 else avg_betas_all[0]
+
+        ## make images for all ROIs
+        for roi2plot in all_rois.keys():
+
+            # for this ROI, 
+            # get vertices for each hemisphere
+            roi_vertices = {}
+            roi_coord_transformed = {}
+
+            for hemi in ['LH', 'RH']:
+                
+                roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                                    roi_list = all_rois[roi2plot],
+                                                                    hemi = hemi)
+                ## get FS coordinates for each ROI vertex
+                roi_coord_transformed[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                                                                                        y_coord_surf[roi_vertices[hemi]])), 
+                                                                                        fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
+                                                                                        roi_name = roi2plot+'_'+hemi)
+
+            if len(participant_list) > 1:
+                # if looking at group data, z-score and average per hemi
+                avg_z_betas_dict = {}
+                for hemi in ['LH', 'RH']:
+                    group_z_betas = [self.somaModelObj.zscore_reg_betas(avg_betas_all[s][roi_vertices[hemi]])[np.newaxis,...] for s in np.arange(len(participant_list))]
+                    group_z_betas = np.vstack(group_z_betas)
+
+                    avg_z_betas_dict[hemi] = np.nanmean(group_z_betas, axis = 0)
+
+                ## plot betas in hexabin
+                # for each region and both hemispheres
+                for region in ['face', 'right_hand', 'left_hand', 'both_hand']:
+                    
+                    self.plot_betas_roi_hexabins(avg_z_betas_dict, roi_coord_transformed, 
+                                                regs2plot = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region],
+                                                hemi_labels = ['LH', 'RH'], vmin = -2, vmax = 2,
+                                                fig_name = 'sub-group_ROI-{r}_regs-{rg}_glmsinglebetas_zscore.png'.format(r = roi2plot,
+                                                                                                                        rg = region))
+            else:
+                ## plot betas in hexabin
+                # for each region and both hemispheres
+                for region in ['face', 'right_hand', 'left_hand', 'both_hand']:
+                    
+                    self.plot_betas_roi_hexabins(avg_betas, roi_coord_transformed, roi_vertices = roi_vertices,
+                                                regs2plot = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region],
+                                                hemi_labels = ['LH', 'RH'], vmin = -2, vmax = 2,
+                                                fig_name = 'sub-{s}_ROI-{r}_regs-{rg}_glmsinglebetas.png'.format(s = pp,
+                                                                                                                r = roi2plot,
+                                                                                                                rg = region))
+
+    
+    def plot_flatmap(self, data_arr, verts, vmin = 0, vmax = 80, cmap='hot', fig_abs_name = None):
+
+        """
+        plot flatmap of data (1D)
+        only show select vertices
+        """
+
+        surface_arr = np.zeros(data_arr.shape[0])
+        surface_arr[:] = np.nan
+        surface_arr[verts] = data_arr[verts]
+
+        flatmap = cortex.Vertex(surface_arr, 
+                        self.pysub,
+                        vmin = vmin, vmax = vmax, 
+                        cmap = cmap)
+        cortex.quickshow(flatmap, with_curvature=True,with_sulci=True, with_labels=False)
+
+        # if we provide absolute name for figure, then save there
+        if fig_abs_name is not None:
+
+            fig_pth = op.split(fig_abs_name)[0]
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+
+            print('saving %s' %fig_abs_name)
+            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=True,
+                                        with_colorbar=False,with_curvature=True,with_sulci=True)
+

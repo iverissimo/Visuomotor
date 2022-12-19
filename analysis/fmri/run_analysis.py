@@ -94,6 +94,14 @@ elif py_cmd == 'plot_tc':
 
     plotter.plot_glmsingle_tc(Visuomotor_data.sj_num[0], int(vertex))
 
+elif py_cmd == 'plot_hex':
+
+    data_model = GLMsingle_Model(Visuomotor_data)
+
+    plotter = somaViewer(data_model)
+
+    plotter.plot_glmsingle_roi_betas(Visuomotor_data.sj_num)
+
 
 
 

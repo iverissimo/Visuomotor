@@ -149,6 +149,24 @@ fitting:
             'mouth',
             'tongue']
 
+      right_hand: ['rhand_fing1',
+                  'rhand_fing2',
+                  'rhand_fing3',
+                  'rhand_fing4',
+                  'rhand_fing5']
+      
+      left_hand: ['lhand_fing1',
+                  'lhand_fing2',
+                  'lhand_fing3',
+                  'lhand_fing4',
+                  'lhand_fing5']
+
+      both_hand: ['bhand_fing1',
+                  'bhand_fing2',
+                  'bhand_fing3',
+                  'bhand_fing4',
+                  'bhand_fing5']
+
       upper_limb: ['lhand_fing1',
                   'lhand_fing2',
                   'lhand_fing3',

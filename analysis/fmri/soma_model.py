@@ -432,8 +432,6 @@ class somaModel:
         return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
 
 
-
-
 class GLMsingle_Model(somaModel):
 
     def __init__(self, MRIObj, outputdir = None):
@@ -1116,6 +1114,19 @@ class GLMsingle_Model(somaModel):
                         end_time = end_time,
                         dur  = end_time - start_time))
 
+    def zscore_reg_betas(self, betas):
+
+        """
+        z-score betas per condition
+        """
+
+        zbetas = []
+
+        for i in np.arange(betas.shape[-1]): # assumes betas is [vert, regs]
+            
+            zbetas.append((betas[...,i] - np.mean(betas[...,i]))/np.std(betas[...,i]))
+
+        return np.vstack(zbetas).T
 
 class somaRF_Model(GLMsingle_Model):
 

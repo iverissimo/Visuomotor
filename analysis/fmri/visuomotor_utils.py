@@ -1769,3 +1769,11 @@ def make_raw_vertex_image(data2plot,cmap,vmin,vmax,subject='fsaverage_meridians'
     vx_fin = cortex.VertexRGB(*display_data, subject,curvature_brightness = 0.4, curvature_contrast = 0.1)
 
     return vx_fin
+
+
+def weighted_avg(data_arr, weight_arr, main_axis = 0):
+
+    """
+    helper function to do a weighted average along an axis
+    """
+    return np.average(data_arr, axis = main_axis, weights = weight_arr)
