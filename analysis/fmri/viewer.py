@@ -250,6 +250,70 @@ class somaViewer:
 
         fig.savefig(op.join(fig_pth, fig_name), dpi=100,bbox_inches = 'tight')
 
+
+    def plot_betas_roi_binned(self, betas_arr, roi_coords, roi_vertices = None, n_bins = 100, weight_arr = [],
+                                    regs2plot = [], hemi_labels = ['LH', 'RH'], fig_name = '', vmin=-40, vmax=40):
+
+        """
+        plot weighted sum of betas for an ROI
+        over binned y axis
+        """
+        
+        fig_pth = op.join(self.outputdir, 'betas_ROI_ybins')
+        # if output path doesn't exist, create it
+        os.makedirs(fig_pth, exist_ok = True)
+
+        # indices for regressors for interest
+        reg_ind = [np.where((self.somaModelObj.soma_cond_unique == name))[0][0] for name in regs2plot]
+
+        # make figure
+        # row is hemisphere, columns regressor
+        fig, axs = plt.subplots(1, len(hemi_labels), sharey=True, figsize=(18,8))
+
+        for hi, hemi in enumerate(hemi_labels):
+
+            # make y bins
+            ybins = np.linspace(np.min(roi_coords[hemi][1]), 
+                                np.max(roi_coords[hemi][1]), n_bins+1, endpoint=False)
+            
+            # get betas for vertices of that ROI and hemisphere
+            if isinstance(betas_arr,dict):
+                reg_betas = betas_arr[hemi][..., reg_ind]
+            else:
+                if roi_vertices is not None:
+                    reg_betas = betas_arr[..., reg_ind][roi_vertices[hemi]]
+                else:
+                    reg_betas = betas_arr[..., reg_ind]
+
+            # for each regressor, get summed betas for each bin
+            betas_binned_arr = []
+            for ind, reg_name in enumerate(regs2plot):
+
+                betas_reg_bin = []
+                for b_ind in np.arange(len(ybins)):
+                
+                    if b_ind == len(ybins) - 1:
+                        vert_bin = np.where(((roi_coords[hemi][1] >= ybins[b_ind:][0])))[0]
+                    else:
+                        vert_bin = np.where(((roi_coords[hemi][1] >= ybins[b_ind:b_ind+2][0]) & \
+                                            (roi_coords[hemi][1] < ybins[b_ind:b_ind+2][1])))[0]
+                        
+                    betas_reg_bin.append(reg_betas[vert_bin][...,ind].dot(weight_arr[roi_vertices[hemi]][vert_bin]/100))
+                    
+                betas_binned_arr.append(np.flip(betas_reg_bin)) # to then show with right orientation
+                
+            sc = axs[hi].imshow(np.vstack(betas_binned_arr).T, 
+                            aspect='auto', cmap = 'RdBu_r', vmin = vmin, vmax = vmax)
+
+            axs[hi].set_xticks(range(len(regs2plot)))
+            axs[hi].set_xticklabels(regs2plot)
+            axs[hi].set_title(hemi)
+
+        fig.colorbar(sc)
+
+        fig.savefig(op.join(fig_pth, fig_name), dpi=100,bbox_inches = 'tight')
+
+
     def plot_glmsingle_roi_betas(self, participant_list, all_rois = {'M1': ['4'], 'S1': ['3b']}):
 
         """
@@ -266,6 +330,7 @@ class somaViewer:
 
         ## load betas per participant
         avg_betas_all = []
+        r2_all = []
 
         for pp in participant_list:
 
@@ -286,7 +351,11 @@ class somaViewer:
             ## append for pp in list
             avg_betas_all.append(avg_betas[np.newaxis,...])
 
+            # append r2
+            r2_all.append(results_glmsingle['typed']['R2'][np.newaxis,...])
+
         avg_betas_all = np.vstack(avg_betas_all) if len(participant_list) > 1 else avg_betas_all[0]
+        r2_all = np.mean(np.vstack(r2_all), axis = 0)
 
         ## make images for all ROIs
         for roi2plot in all_rois.keys():
@@ -325,6 +394,13 @@ class somaViewer:
                                                 hemi_labels = ['LH', 'RH'], vmin = -2, vmax = 2,
                                                 fig_name = 'sub-group_ROI-{r}_regs-{rg}_glmsinglebetas_zscore.png'.format(r = roi2plot,
                                                                                                                         rg = region))
+
+                    self.plot_betas_roi_binned(avg_z_betas_dict, roi_coord_transformed, roi_vertices = roi_vertices,
+                                                n_bins = 100, weight_arr = r2_all,
+                                                regs2plot = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region],
+                                                hemi_labels = ['LH', 'RH'], vmin = -20, vmax = 20,
+                                                fig_name = 'sub-group_ROI-{r}_regs-{rg}_binned_glmsinglebetas_zscore.png'.format(r = roi2plot,
+                                                                                                                                rg = region))
             else:
                 ## plot betas in hexabin
                 # for each region and both hemispheres
