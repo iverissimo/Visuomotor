@@ -13,7 +13,7 @@ import datetime
 from glmsingle.glmsingle import GLM_single
 from glmsingle.ols.make_poly_matrix import make_polynomial_matrix, make_projection_matrix
 
-from visuomotor_utils import leave_one_out
+from visuomotor_utils import leave_one_out, split_half_comb, correlate_arrs
 
 import scipy
 
@@ -432,6 +432,56 @@ class somaModel:
         return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
 
 
+class GLM_Model(somaModel):
+
+    def __init__(self, MRIObj, outputdir = None):
+        
+        """__init__
+        constructor for class 
+        
+        Parameters
+        ----------
+        MRIObj : MRIData object
+            object from one of the classes defined in processing.load_exp_data
+        outputdir: str or None
+            path to general output directory            
+        """
+
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
+
+        # if output dir not defined, then make it in derivatives
+        if outputdir is None:
+            self.outputdir = op.join(self.MRIObj.derivatives_pth, 'glm_fits')
+        else:
+            self.outputdir = outputdir
+
+    
+    def fit_data(self, participant, fit_type = 'mean'):
+
+        """ fit glm model to participant data (averaged over runs)
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        # get list with gii files
+        gii_filenames = self.get_soma_file_list(participant, 
+                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+
+        if fit_type == 'mean':         
+            # load data of all runs
+            all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
+
+            # average runs
+            data2fit = np.nanmean(all_data, axis = 0)
+
+        elif fit_type == 'loo_run':
+            print('not implemented yet')
+
+
 class GLMsingle_Model(somaModel):
 
     def __init__(self, MRIObj, outputdir = None):
@@ -498,7 +548,6 @@ class GLMsingle_Model(somaModel):
             all_dm.append(design_array)
 
         return all_dm
-
 
     def average_betas_per_cond(self, single_trial_betas):
 
@@ -736,6 +785,9 @@ class GLMsingle_Model(somaModel):
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
+        ## make binary mask to exclude relevant voxels from noisepool
+        binary_mask = self.make_correlation_mask(np.array(all_data), percentile_thresh = 99)
+
         ## create a directory for saving GLMsingle outputs
         opt = dict()
 
@@ -759,8 +811,8 @@ class GLMsingle_Model(somaModel):
         opt['hrfonset'] = -(self.MRIObj.soma_event_time_in_sec['empty'] % self.MRIObj.TR) 
 
         #opt['hrftoassume'] = hrf_final
-        #opt['brainexclude'] = final_mask.astype(int) #prf_mask.astype(int)
-        #opt['brainR2'] = 100
+        opt['brainexclude'] = binary_mask.astype(int) 
+        opt['brainR2'] = 100
 
         opt['brainthresh'] = [99, 0] # which allows all voxels to pass the intensity threshold
 
@@ -873,6 +925,17 @@ class GLMsingle_Model(somaModel):
         fig_name = op.join(out_dir, 'modeltypeA_ONOFF_betas.png')
         print('saving %s' %fig_name)
         _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
+        # save binary mask used
+        flatmap = cortex.Vertex(binary_mask, 
+                        self.MRIObj.sj_space,
+                        vmin = 0, vmax = 1, #.7,
+                        cmap='hot')
+        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
+        fig_name = op.join(out_dir, 'binary_mask_corr.png')
+        print('saving %s' %fig_name)
+        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
+
 
     def load_results_dict(self, participant, fits_dir = None, load_opts = False):
 
@@ -1127,6 +1190,53 @@ class GLMsingle_Model(somaModel):
             zbetas.append((betas[...,i] - np.mean(betas[...,i]))/np.std(betas[...,i]))
 
         return np.vstack(zbetas).T
+
+    def make_correlation_mask(self, data_runs, percentile_thresh = 99, n_jobs = 8):
+
+        """
+        Calculate split-half correlation across all combinations of runs 
+        Then shuffle timecourses in time and use that null distribution to find a
+        threshold at a certain percentile
+        Will return binary mask that can be used for noise pool 
+        
+        Parameters
+        ----------
+        data_runs: arr
+            data array with all runs stacked [runs, vertex, TR]
+        percentile_thresh: int/float
+            qth percentile to use as threshold 
+        """
+
+        ## split runs in half and get unique combinations
+        run_sh_lists = split_half_comb(np.arange(data_runs.shape[0]))
+
+        # get correlation value for each combination
+        corr_arr = []
+        rnd_corr_arr = []
+
+        for r in run_sh_lists:
+            
+            ## correlate the two halfs
+            corr_arr.append(correlate_arrs(np.mean(np.array(data_runs)[list(r[0])], axis = 0), 
+                                            np.mean(np.array(data_runs)[list(r[-1])], axis = 0), 
+                                            n_jobs = n_jobs, shuffle_axis = None))
+            
+            ## correlate with randomized half
+            rnd_corr_arr.append(correlate_arrs(np.mean(np.array(data_runs)[list(r[0])], axis = 0), 
+                                            np.mean(np.array(data_runs)[list(r[-1])], axis = 0), 
+                                            n_jobs = n_jobs, shuffle_axis = -1))
+
+        # average values 
+        avg_sh_corr = np.nanmean(corr_arr, axis = 0)
+        avg_sh_rnd_corr = np.nanmean(rnd_corr_arr, axis = 0)
+
+        ## make final mask
+        # we want to exclude vertices below threshold
+        binary_mask = np.ones(avg_sh_corr.shape)
+        binary_mask[avg_sh_corr >= np.nanpercentile(avg_sh_rnd_corr, percentile_thresh)] = 0 # we want to set to 0 the ones that are not in the noise pool 
+
+        return binary_mask
+
 
 class somaRF_Model(GLMsingle_Model):
 

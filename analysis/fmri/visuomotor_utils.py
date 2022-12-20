@@ -38,6 +38,9 @@ from scipy import stats
 from scipy import misc
 from scipy import fft
 
+import itertools
+from joblib import Parallel, delayed
+
 
 def median_gii(files,outdir, run_name='median'):
 
@@ -1777,3 +1780,70 @@ def weighted_avg(data_arr, weight_arr, main_axis = 0):
     helper function to do a weighted average along an axis
     """
     return np.average(data_arr, axis = main_axis, weights = weight_arr)
+
+
+def split_half_comb(input_list):
+
+    """ make list of lists, by spliting half
+    and getting all unique combinations
+    
+    Parameters
+    ----------
+    input_list : list/arr
+        list of items
+    Outputs
+    -------
+    unique_pairs : list/arr
+        list of tuples
+    
+    """
+
+    A = list(itertools.combinations(input_list, int(len(input_list)/2)))
+    
+    combined_pairs = []
+    for pair in A:
+        combined_pairs.append(tuple([pair, tuple([r for r in input_list if r not in pair])]))
+
+    # get unique pairs
+    seen = set()
+    unique_pairs = [t for t in combined_pairs if tuple(sorted(t)) not in seen and not seen.add(tuple(sorted(t)))]
+
+    return unique_pairs
+
+def correlate_arrs(data1_arr, data2_arr, n_jobs = 4, weights=[], shuffle_axis = None):
+    
+    """
+    Compute Pearson correlation between two numpy arrays
+    
+    Parameters
+    ----------
+    data1 : list/array
+        numpy array 
+    data2 : list/array
+        same as data1
+    n_jobs : int
+        number of jobs for parallel
+    
+    """ 
+    
+    # if we indicate an axis to shuffle, then do so
+    if shuffle_axis is not None:
+
+        if shuffle_axis == -1:
+            data_shuf1 = data1_arr.T.copy()
+            np.random.shuffle(data_shuf1)
+            data1_arr = data_shuf1.T.copy()
+
+            data_shuf2 = data2_arr.T.copy()
+            np.random.shuffle(data_shuf2)
+            data2_arr = data_shuf2.T.copy()
+
+        elif shuffle_axis == 0:
+            np.random.shuffle(data1_arr)
+            np.random.shuffle(data2_arr)
+    
+    ## actually correlate
+    correlations = np.array(Parallel(n_jobs=n_jobs)(delayed(np.corrcoef)(data1_arr[i], data2_arr[i]) for i in np.arange(data1_arr.shape[0])))[...,0,1]
+            
+    return correlations
+    
