@@ -16,7 +16,7 @@ import datetime
 from glmsingle.glmsingle import GLM_single
 from glmsingle.ols.make_poly_matrix import make_polynomial_matrix, make_projection_matrix
 
-from visuomotor_utils import leave_one_out, split_half_comb, correlate_arrs
+from visuomotor_utils import leave_one_out, split_half_comb, correlate_arrs, COM
 
 import scipy
 
@@ -61,7 +61,6 @@ class somaModel:
         # get unique labels of conditions
         _, idx = np.unique(self.soma_stim_labels, return_index=True) 
         self.soma_cond_unique = np.array(self.soma_stim_labels)[np.sort(idx)]
-
 
     def get_soma_file_list(self, participant, file_ext = 'sg_psc.func.gii'):
 
@@ -772,6 +771,103 @@ class GLM_Model(somaModel):
                         end_time = end_time,
                         dur  = end_time - start_time))
         
+    def make_COM_maps(self, participant, region = 'face',
+                        hrf_model = 'glover', z_threshold = 3.1):
+
+        """ Make COM maps for a specific region
+        given betas from GLM fit
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        ## make new out dir, depeding on our HRF approach
+        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
+                                        'sub-{sj}'.format(sj = participant))
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
+        # path where Region contrasts were stored
+        stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
+                                                'sub-{sj}'.format(sj = participant))
+
+        # load GLM estimates, and get betas and prediction
+        soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+        betas = soma_estimates['betas']
+        prediction = soma_estimates['prediction']
+        r2 = soma_estimates['r2']
+
+        # load z-score localizer area, for region movements
+        if region == 'face':
+            z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True).item()['z_score']
+
+            # mask for relevant vertices
+            region_mask = z_score_region.copy(); 
+            region_mask[z_score_region < z_threshold] = np.nan
+        else:
+            # we are going to look at left and right individually, so there are 2 region masks
+            z_score_region = np.load(op.join(stats_dir, 'stats_{r}_RvsL_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True).item()['z_score']
+
+            region_mask = {}
+            region_mask['R'] = z_score_region.copy()
+            region_mask['R'][z_score_region < 0] = np.nan
+            region_mask['L'] = z_score_region.copy()
+            region_mask['L'][z_score_region > 0] = np.nan
+
+        # make average event file for pp, based on events file
+        events_avg = self.get_avg_events(participant)
+
+        # specifying the timing of fMRI frames
+        frame_times = self.MRIObj.TR * (np.arange(prediction.shape[-1]))
+
+        # Create the design matrix, hrf model containing Glover model 
+        design_matrix = make_first_level_design_matrix(frame_times,
+                                                    events = events_avg,
+                                                    hrf_model = hrf_model
+                                                    )
+        ## get beta values for region 
+        # and z mask
+        if region == 'face':
+            region_regs = self.MRIObj.params['fitting']['soma']['all_contrasts'][region]
+            region_betas = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in region_regs]
+            region_betas = np.vstack(region_betas)
+
+        elif region == 'upper_limb':
+
+            region_betas = {}
+            region_betas['R'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['right_hand']]
+            region_betas['R'] = np.vstack(region_betas['R'])
+
+            region_betas['L'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['left_hand']]
+            region_betas['L'] = np.vstack(region_betas['L'])
+        
+        # calculate COM for all vertices
+        if isinstance(region_betas, dict):
+            
+            for side in ['L', 'R']:
+                COM_all = COM(region_betas[side])
+            
+                COM_surface = np.zeros(region_mask[side].shape); COM_surface[:] = np.nan
+                COM_surface[np.where((~np.isnan(region_mask[side])))[0]] = COM_all[np.where((~np.isnan(region_mask[side])))[0]]
+                # save
+                np.save(op.join(out_dir, 'COM_reg-{r}_{s}.npy'.format(r = region, s = side)), COM_surface)
+                np.save(op.join(out_dir, 'zmask_reg-{r}_{s}.npy'.format(r = region, s = side)), region_mask[side])
+
+        else:
+            COM_all = COM(region_betas)
+            
+            COM_surface = np.zeros(region_mask.shape); COM_surface[:] = np.nan
+            COM_surface[np.where((~np.isnan(region_mask)))[0]] = COM_all[np.where((~np.isnan(region_mask)))[0]]
+            # save
+            np.save(op.join(out_dir, 'COM_reg-{r}.npy'.format(r = region)), COM_surface)
+            np.save(op.join(out_dir, 'zmask_reg-{r}.npy'.format(r = region)), region_mask)
+
+
 
 class GLMsingle_Model(somaModel):
 

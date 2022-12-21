@@ -44,7 +44,14 @@ CLI.add_argument("--cmd",
                 #nargs="*",
                 type=str,  # any type/callable can be used here
                 required=True,
-                help = 'What analysis to run?\n Options: postfmriprep, '
+                help = 'What plot to make?\n Options: COM_maps, glmsing_tc, glmsing_hex  '
+                )
+
+CLI.add_argument("--model",
+                #nargs="*",
+                type=str,  # any type/callable can be used here
+                required=True,
+                help = 'What model to use?\n Options: glm, glmsingle, somaRF '
                 )
 
 # parse the command line
@@ -55,54 +62,47 @@ sj = args.subject[0] if len(args.subject) == 1 else args.subject # for situation
 system_dir = args.system
 exclude_sj = args.exclude
 py_cmd = args.cmd
+model_name = args.model
 
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
                         base_dir = system_dir, 
                         exclude_sj = exclude_sj)
 
-## Run specific command
-if py_cmd == 'postfmriprep':
-
-    Visuomotor_data.post_fmriprep_proc()
-
-elif py_cmd == 'fit_glmsingle':
-
-    data_model = GLMsingle_Model(Visuomotor_data)
-
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.fit_data(pp)
-
-elif py_cmd == 'fit_glm':
-
+if model_name == 'glm':
     data_model = GLM_Model(Visuomotor_data)
 
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.fit_data(pp, fit_type = 'mean_run', hrf_model = 'glover')
-
-elif py_cmd == 'stats_glmsingle':
-
+elif model_name == 'glmsingle':
     data_model = GLMsingle_Model(Visuomotor_data)
 
+## initialize plotter
+plotter = somaViewer(data_model)
+
+## run command
+if py_cmd == 'glmsing_tc': # timcourse for vertex given GLM single average betas for each run
+
+    vertex = ''
+    while len(vertex) == 0:
+        vertex = input("Vertex number to plot?: ")
+
+    plotter.plot_glmsingle_tc(Visuomotor_data.sj_num[0], int(vertex))
+
+elif py_cmd == 'glmsing_hex': # hexabin maps for each beta regressor of GLM single, averaged across runs/repetitions
+
+    plotter.plot_glmsingle_roi_betas(Visuomotor_data.sj_num)
+
+elif py_cmd == 'COM_maps': # center of mass maps for standard GLM over average of runs
+
+    region = ''
+    while len(region) == 0:
+        region = input("Which region to plot? (ex: face, upper_limb): ")
+
     ## loop over all subjects 
     for pp in Visuomotor_data.sj_num:
-        data_model.compute_roi_stats(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
-
-elif py_cmd == 'stats_glm':
-
-    data_model = GLM_Model(Visuomotor_data)
-
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
+        plotter.plot_COM_maps(pp, region = region)
 
 
 
+    
 
-
-
-
-
-
+    

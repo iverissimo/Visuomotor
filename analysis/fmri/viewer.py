@@ -10,6 +10,8 @@ import ptitprince as pt # raincloud plots
 import matplotlib.patches as mpatches
 from  matplotlib.ticker import FuncFormatter
 
+from visuomotor_utils import normalize, add_alpha2colormap
+
 import cortex
 
 class somaViewer:
@@ -441,4 +443,96 @@ class somaViewer:
             print('saving %s' %fig_abs_name)
             _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=True,
                                         with_colorbar=False,with_curvature=True,with_sulci=True)
+
+
+    def plot_COM_maps(self, participant, region = 'face', n_bins = 256):
+
+        """
+        plot COM maps from GLM betas
+        """
+
+        fig_pth = op.join(self.outputdir, 'glm_COM_maps',
+                                            'sub-{sj}'.format(sj = participant))
+        # if output path doesn't exist, create it
+        os.makedirs(fig_pth, exist_ok = True)
+
+        # load GLM estimates, and get betas and prediction
+        soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                        'sub-{sj}'.format(sj = participant), 
+                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+        r2 = soma_estimates['r2']
+
+        # normalize the distribution, for better visualization
+        region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
+
+        # call COM function
+        self.somaModelObj.make_COM_maps(participant, region = region)
+
+        ## load COM values and plot
+        if region == 'face':
+
+            com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant), 'COM_reg-face.npy')
+
+            COM_region = np.load(com_betas_dir, allow_pickle = True)
+            
+            # create costume colormp J4
+            n_bins = 256
+            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
+                                                                bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
+            print('created costum colormap %s'%col2D_name)
+            
+            
+            # vertex for face vs all others
+            flatmap = cortex.Vertex2D(COM_region, 
+                                    region_mask_alpha,
+                                    subject = self.pysub,
+                                    vmin=0, vmax=3,
+                                    vmin2 = 0, vmax2 = 1,
+                                    cmap = col2D_name)
+
+            cortex.quickshow(flatmap,with_curvature=True,with_sulci=True,with_colorbar=True, 
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+            
+            filename = op.join(fig_pth, 'COM_flatmap_region-face.png')
+            print('saving %s' %filename)
+            _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
+                                                with_curvature=True,with_sulci=True,with_labels=False,
+                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+                
+        else:
+            for side in ['L', 'R']:
+                
+                com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant), 'COM_reg-upper_limb_{s}.npy'.format(s=side))
+
+                COM_region = np.load(com_betas_dir, allow_pickle = True)
+                
+                # create costume colormp J4
+                n_bins = 256
+                col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
+                                                                    bins = n_bins, 
+                                                                    cmap_name = 'rainbow_r'))[-1])[0]
+                print('created costum colormap %s'%col2D_name)
+
+
+                # vertex for face vs all others
+                flatmap = cortex.Vertex2D(COM_region, 
+                                        region_mask_alpha,
+                                        subject = self.pysub,
+                                        vmin=0, vmax=4,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
+
+                cortex.quickshow(flatmap,with_curvature=True,with_sulci=True,with_colorbar=True, 
+                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+            
+                filename = op.join(fig_pth, 'COM_flatmap_region-upper_limb_{s}hand.png'.format(s=side))
+                print('saving %s' %filename)
+                _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
+                                                    with_curvature=True,with_sulci=True,with_labels=False,
+                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+
+
 
