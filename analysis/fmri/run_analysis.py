@@ -10,7 +10,7 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
     params = yaml.safe_load(f_in)
 
 from preproc_mridata import MRIData
-from soma_model import GLMsingle_Model
+from soma_model import GLMsingle_Model, GLM_Model
 
 from viewer import somaViewer
 
@@ -74,6 +74,14 @@ elif py_cmd == 'fit_glmsingle':
     for pp in Visuomotor_data.sj_num:
         data_model.fit_data(pp)
 
+elif py_cmd == 'fit_glm':
+
+    data_model = GLM_Model(Visuomotor_data)
+
+    ## loop over all subjects 
+    for pp in Visuomotor_data.sj_num:
+        data_model.fit_data(pp, fit_type = 'mean_run', hrf_model = 'glover')
+
 elif py_cmd == 'stats_glmsingle':
 
     data_model = GLMsingle_Model(Visuomotor_data)
@@ -81,6 +89,14 @@ elif py_cmd == 'stats_glmsingle':
     ## loop over all subjects 
     for pp in Visuomotor_data.sj_num:
         data_model.compute_roi_stats(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
+
+elif py_cmd == 'stats_glm':
+
+    data_model = GLM_Model(Visuomotor_data)
+
+    ## loop over all subjects 
+    for pp in Visuomotor_data.sj_num:
+        data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
 
 elif py_cmd == 'plot_tc':
 

@@ -8,6 +8,9 @@ import glob
 from nilearn import surface
 import nibabel as nib
 
+from nilearn.glm.first_level import make_first_level_design_matrix
+from nilearn.plotting import plot_design_matrix
+
 import datetime
 
 from glmsingle.glmsingle import GLM_single
@@ -456,8 +459,221 @@ class GLM_Model(somaModel):
         else:
             self.outputdir = outputdir
 
+    def get_avg_events(self, participant):
+
+        """ get events for participant (averaged over runs)
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        events_list = [run for run in glob.glob(op.join(self.MRIObj.sourcedata_pth,
+                                'sub-{sj}'.format(sj=participant),'*','func/*')) if 'soma' in run and run.endswith('events.tsv')]
+
+        # list of stimulus onsets
+        print('averaging %d event files'%len(events_list))
+
+        all_events = []
+
+        for _,val in enumerate(events_list):
+
+            events_pd = pd.read_csv(val,sep = '\t')
+
+            new_events = []
+
+            for ev in events_pd.iterrows():
+                row = ev[1]   
+                if row['trial_type'][0] == 'b': # if both hand/leg then add right and left events with same timings
+                    new_events.append([row['onset'],row['duration'],'l'+row['trial_type'][1:]])
+                    new_events.append([row['onset'],row['duration'],'r'+row['trial_type'][1:]])
+                else:
+                    new_events.append([row['onset'],row['duration'],row['trial_type']])
+
+            df = pd.DataFrame(new_events, columns=['onset','duration','trial_type'])  #make sure only relevant columns present
+            all_events.append(df)
+
+        # make median event dataframe
+        onsets = []
+        durations = []
+        for w in range(len(all_events)):
+            onsets.append(all_events[w]['onset'])
+            durations.append(all_events[w]['duration'])
+
+        events_avg = pd.DataFrame({'onset':np.median(np.array(onsets),axis=0),
+                                   'duration':np.median(np.array(durations),axis=0),
+                                   'trial_type':all_events[0]['trial_type']})
+        
+        print('computed median events')
+
+        return events_avg
+
+    def fit_glm_tc(self, voxel, dm):
     
-    def fit_data(self, participant, fit_type = 'mean'):
+        """ GLM fit on timeseries
+        Regress a created design matrix on the input_data.
+
+        Parameters
+        ----------
+        voxel : arr
+            timeseries of a single voxel
+        dm : arr
+            DM array (#TR,#regressors)
+                
+        """
+
+        if np.isnan(voxel).any():
+            betas = np.repeat(np.nan, dm.shape[-1])
+            prediction = np.repeat(np.nan, dm.shape[0])
+            mse = np.nan
+            r2 = np.nan
+
+        else:   # if not nan (some vertices might have nan values)
+            betas = np.linalg.lstsq(dm, voxel, rcond = -1)[0]
+            prediction = dm.dot(betas)
+
+            mse = np.mean((voxel - prediction) ** 2) # calculate mean of squared residuals
+            r2 = np.nan_to_num(1 - (np.nansum((voxel - prediction)**2, axis=0)/ np.nansum((voxel**2), axis=0)))# and the rsq
+        
+        return prediction, betas, r2, mse
+
+    def contrast_regions(self, participant, hrf_model = 'glover', z_threshold = 3.1, pval_1sided = True):
+
+        """ Make simple contrasts to localize body regions
+        (body, hands, legs) and contralateral regions (R vs L hand)
+
+        Requires GLM fitting to have been done before
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        ## make new out dir, depeding on our HRF approach
+        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
+                                        'sub-{sj}'.format(sj = participant))
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
+        # get list with gii files
+        gii_filenames = self.get_soma_file_list(participant, 
+                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+
+        # load and average data of all runs
+        all_data = self.load_data4fitting(gii_filenames)
+        avg_data = np.nanmean(all_data, axis = 0) # [vertex, TR]
+
+        # make average event file for pp, based on events file
+        events_avg = self.get_avg_events(participant)
+
+        # specifying the timing of fMRI frames
+        frame_times = self.MRIObj.TR * (np.arange(avg_data.shape[-1]))
+
+        # Create the design matrix, hrf model containing Glover model 
+        design_matrix = make_first_level_design_matrix(frame_times,
+                                                    events = events_avg,
+                                                    hrf_model = hrf_model
+                                                    )
+
+        ## load estimates, and get betas and prediction
+        soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+        betas = soma_estimates['betas']
+        prediction = soma_estimates['prediction']
+
+        # now make simple contrasts
+        print('Computing simple contrasts')
+        print('Using z-score of %0.2f as threshold for localizer' %z_threshold)
+
+        reg_keys = ['face', 'upper_limb', 'lower_limb']
+        region_regs = {'face': self.MRIObj.params['fitting']['soma']['all_contrasts']['face'],
+                       'upper_limb': [val for val in self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb'] if 'bhand' not in val],
+                       'lower_limb': [val for val in self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb'] if 'bleg' not in val]}
+
+        loo_keys = leave_one_out(reg_keys) # loo for keys 
+
+        # one broader region vs all the others
+        for index,region in enumerate(reg_keys): 
+
+            print('contrast for %s ' %region)
+
+            # list of other contrasts
+            other_contr = np.append(region_regs[loo_keys[index][0]],
+                                    region_regs[loo_keys[index][1]])
+
+            # main contrast calculated
+            contrast = self.set_contrast(design_matrix.columns, 
+                                    [region_regs[str(region)], other_contr],
+                                [1,-len(region_regs[str(region)])/len(other_contr)],
+                                num_cond=2)
+
+            # set filename
+            stats_filename = op.join(out_dir, 'stats_{reg}_vs_all_contrast.npy'.format(reg = region))
+            
+            # compute contrast-related statistics
+            soma_stats = Parallel(n_jobs=16)(delayed(self.calc_contrast_stats)(betas = betas[v], 
+                                                                            contrast = contrast, 
+                                                                            sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
+                                                                            df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
+                                                                            design_var = self.design_variance(design_matrix.values, contrast), 
+                                                                            pval_1sided = pval_1sided) for v in np.arange(avg_data.shape[0]))
+            soma_stats = np.vstack(soma_stats) # t_val,p_val,zscore
+            soma_stats_dict = {}
+            soma_stats_dict['t_val'] = soma_stats[..., 0]
+            soma_stats_dict['p_val'] = soma_stats[..., 1]
+            soma_stats_dict['z_score'] = soma_stats[..., 2]
+            
+            np.save(stats_filename, soma_stats_dict)
+
+            ## now do rest of the contrasts within region (if lateralized) ###
+
+            if region != 'face':
+
+                # compare left and right
+                print('Right vs Left contrasts')
+
+                if region == 'upper_limb':
+                    limbs = ['hand', self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb']]
+                else:
+                    limbs = ['leg', self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb']]
+                            
+                rtask = [s for s in limbs[-1] if 'r'+limbs[0] in s]
+                ltask = [s for s in limbs[-1] if 'l'+limbs[0] in s]
+                tasks = [rtask,ltask] # list with right and left elements
+                            
+                contrast = self.set_contrast(design_matrix.columns, tasks, [1, -1], num_cond=2)
+
+                # set filename
+                LR_stats_filename = op.join(out_dir, 'stats_{reg}_RvsL_contrast.npy'.format(reg = region))
+
+                # mask data - only significant voxels for region
+                region_ind = np.where((soma_stats_dict['z_score'] >= z_threshold))[0]
+
+                # compute contrast-related statistics
+                LR_stats = Parallel(n_jobs=16)(delayed(self.calc_contrast_stats)(betas = betas[v], 
+                                                                            contrast = contrast, 
+                                                                            sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
+                                                                            df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
+                                                                            design_var = self.design_variance(design_matrix.values, contrast), 
+                                                                            pval_1sided = pval_1sided) for v in tqdm(region_ind))
+                LR_stats = np.vstack(LR_stats) # t_val, p_val, zscore
+
+                # fill for whole surface
+                LR_surf_stats = np.zeros((soma_stats_dict['z_score'].shape[0], LR_stats.shape[-1]))
+                LR_surf_stats[:] = np.nan
+                LR_surf_stats[region_ind,:] = LR_stats
+
+                # save in dict
+                LR_stats_dict = {}
+                LR_stats_dict['t_val'] = LR_surf_stats[..., 0]
+                LR_stats_dict['p_val'] = LR_surf_stats[..., 1]
+                LR_stats_dict['z_score'] = LR_surf_stats[..., 2]
+                
+                np.save(LR_stats_filename, LR_stats_dict)
+    
+    def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover'):
 
         """ fit glm model to participant data (averaged over runs)
         
@@ -467,20 +683,95 @@ class GLM_Model(somaModel):
             participant ID           
         """
 
+        print('running GLM...')
+        
+        # get start time
+        start_time = datetime.datetime.now()
+
+        ## make new out dir, depeding on our HRF approach
+        out_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
         # get list with gii files
         gii_filenames = self.get_soma_file_list(participant, 
                                             file_ext = self.MRIObj.params['fitting']['soma']['extension'])
 
-        if fit_type == 'mean':         
+        if fit_type == 'mean_run':         
             # load data of all runs
             all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
 
             # average runs
-            data2fit = np.nanmean(all_data, axis = 0)
+            data2fit = np.nanmean(all_data, axis = 0)[np.newaxis,...]
 
         elif fit_type == 'loo_run':
-            print('not implemented yet')
+            # get all run lists
+            run_loo_list = self.get_run_list(gii_filenames)
 
+            # leave one run out, load other and average
+            data2fit = []
+
+            for lo_run_key in run_loo_list:
+                print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
+
+                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file])
+                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
+            
+            data2fit = np.vstack(data2fit)
+
+        # make average event file for pp, based on events file
+        events_avg = self.get_avg_events(participant)
+
+        # specifying the timing of fMRI frames
+        frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
+
+        # Create the design matrix, hrf model containing Glover model 
+        design_matrix = make_first_level_design_matrix(frame_times,
+                                                    events = events_avg,
+                                                    hrf_model = hrf_model
+                                                    )
+
+        # plot design matrix and save just to check if everything fine
+        plot = plot_design_matrix(design_matrix)
+        fig = plot.get_figure()
+        fig.savefig(op.join(out_dir,'design_matrix_HRF-%s.png'%hrf_model), dpi=100,bbox_inches = 'tight')
+
+        ## fit glm for all vertices
+        for rind, data in enumerate(data2fit):
+            
+            print('Fitting GLM')
+
+            if fit_type == 'mean_run':      
+                estimates_filename = op.join(out_dir, 'estimates_run-mean.npy')
+            elif fit_type == 'loo_run':
+                estimates_filename = op.join(out_dir, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2)))
+
+            soma_params = Parallel(n_jobs=16)(delayed(self.fit_glm_tc)(vert, design_matrix.values) for _,vert in enumerate(data))
+
+            estimates_dict = {}
+            estimates_dict['prediction'] = np.array([soma_params[i][0] for i in range(data.shape[0])])
+            estimates_dict['betas'] = np.array([soma_params[i][1] for i in range(data.shape[0])])
+            estimates_dict['r2'] = np.array([soma_params[i][2] for i in range(data.shape[0])])
+            estimates_dict['mse'] = np.array([soma_params[i][3] for i in range(data.shape[0])])
+
+            # calculate CV rsq
+            if fit_type == 'loo_run':
+
+                # load left out data
+                other_run_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[rind]).zfill(2)) in file])
+                
+                estimates_dict['cv_r2'] = np.nan_to_num(1-np.sum((other_run_data - estimates_dict['prediction'])**2, axis=-1)/(other_run_data.shape[-1]*other_run_data.var(-1)))
+
+            # save estimates dict
+            np.save(estimates_filename, estimates_dict)
+
+        # Print duration, for bookeeping
+        end_time = datetime.datetime.now()
+        print("\nStart time:\t{start_time}\nEnd time:\t{end_time}\nDuration:\t{dur}".format(
+                        start_time = start_time,
+                        end_time = end_time,
+                        dur  = end_time - start_time))
+        
 
 class GLMsingle_Model(somaModel):
 
