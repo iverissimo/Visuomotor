@@ -445,7 +445,7 @@ class somaViewer:
                                         with_colorbar=False,with_curvature=True,with_sulci=True)
 
 
-    def plot_COM_maps(self, participant, region = 'face', n_bins = 256):
+    def plot_COM_maps(self, participant, region = 'face', n_bins = 256, plot_cuttout = False):
 
         """
         plot COM maps from GLM betas
@@ -499,6 +499,32 @@ class somaViewer:
             _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
                                                 with_curvature=True,with_sulci=True,with_labels=False,
                                                 curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+            if plot_cuttout:
+                # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+                # left hemi
+                cutout_name = 'zoom_roi_left'
+                _ = cortex.quickflat.make_figure(flatmap,
+                                                with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
+                                                cutout=cutout_name,height=2048)
+
+                filename = op.join(fig_pth, 'COM_cutout_region-face_LH.png')
+                print('saving %s' %filename)
+                _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
+                                            cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+                # right hemi
+                cutout_name = 'zoom_roi_right'
+                _ = cortex.quickflat.make_figure(flatmap,
+                                                with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
+                                                cutout=cutout_name,height=2048)
+
+                filename = op.join(fig_pth, 'COM_cutout_region-face_RH.png')
+                print('saving %s' %filename)
+                _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
+                                            cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+
                 
         else:
             for side in ['L', 'R']:
@@ -531,6 +557,31 @@ class somaViewer:
                 print('saving %s' %filename)
                 _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
                                                     with_curvature=True,with_sulci=True,with_labels=False,
+                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+                if plot_cuttout:
+                    # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
+                    # left hemi
+                    cutout_name = 'zoom_roi_left'
+                    _ = cortex.quickflat.make_figure(flatmap,
+                                                    with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
+                                                    cutout=cutout_name,height=2048)
+
+                    filename = op.join(fig_pth, 'COM_cutout_region-upper_limb_{s}hand_LH.png'.format(s=side))
+                    print('saving %s' %filename)
+                    _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
+                                                cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
+                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+                    # right hemi
+                    cutout_name = 'zoom_roi_right'
+                    _ = cortex.quickflat.make_figure(flatmap,
+                                                    with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
+                                                    cutout=cutout_name,height=2048)
+
+                    filename = op.join(fig_pth, 'COM_cutout_region-upper_limb_{s}hand_RH.png'.format(s=side))
+                    print('saving %s' %filename)
+                    _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
+                                                cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
                                                     curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
