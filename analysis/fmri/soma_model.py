@@ -433,32 +433,7 @@ class somaModel:
 
         return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
 
-
-class GLM_Model(somaModel):
-
-    def __init__(self, MRIObj, outputdir = None):
-        
-        """__init__
-        constructor for class 
-        
-        Parameters
-        ----------
-        MRIObj : MRIData object
-            object from one of the classes defined in processing.load_exp_data
-        outputdir: str or None
-            path to general output directory            
-        """
-
-        # need to initialize parent class (Model), indicating output infos
-        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
-
-        # if output dir not defined, then make it in derivatives
-        if outputdir is None:
-            self.outputdir = op.join(self.MRIObj.derivatives_pth, 'glm_fits')
-        else:
-            self.outputdir = outputdir
-
-    def get_avg_events(self, participant):
+    def get_avg_events(self, participant, keep_b_evs = False):
 
         """ get events for participant (averaged over runs)
         
@@ -484,7 +459,7 @@ class GLM_Model(somaModel):
 
             for ev in events_pd.iterrows():
                 row = ev[1]   
-                if row['trial_type'][0] == 'b': # if both hand/leg then add right and left events with same timings
+                if (row['trial_type'][0] == 'b') and (keep_b_evs == False): # if both hand/leg then add right and left events with same timings
                     new_events.append([row['onset'],row['duration'],'l'+row['trial_type'][1:]])
                     new_events.append([row['onset'],row['duration'],'r'+row['trial_type'][1:]])
                 else:
@@ -507,6 +482,32 @@ class GLM_Model(somaModel):
         print('computed median events')
 
         return events_avg
+
+
+class GLM_Model(somaModel):
+
+    def __init__(self, MRIObj, outputdir = None):
+        
+        """__init__
+        constructor for class 
+        
+        Parameters
+        ----------
+        MRIObj : MRIData object
+            object from one of the classes defined in processing.load_exp_data
+        outputdir: str or None
+            path to general output directory            
+        """
+
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
+
+        # if output dir not defined, then make it in derivatives
+        if outputdir is None:
+            self.outputdir = op.join(self.MRIObj.derivatives_pth, 'glm_fits')
+        else:
+            self.outputdir = outputdir
+
 
     def fit_glm_tc(self, voxel, dm):
     
@@ -897,7 +898,7 @@ class GLMsingle_Model(somaModel):
         self.glm_single_ops = self.MRIObj.params['fitting']['soma']['glm_single_ops']
 
     
-    def get_dm_glmsing(self, nr_TRs = 141, nr_runs = 1):
+    def get_dm_glmsing(self, nr_TRs = 141, nr_runs = 1, sing_trial = False):
 
         """
         make glmsingle DM for all runs
@@ -905,7 +906,9 @@ class GLMsingle_Model(somaModel):
         Parameters
         ----------
         nr_TRs: int
-            number of TRs in run          
+            number of TRs in run  
+        sing_trial: bool
+            if we want a dm of unique conditions or of single trial events        
         """
 
         ## get trial timings, in TR
@@ -915,20 +918,79 @@ class GLMsingle_Model(somaModel):
         # trial duration (including ITIs)
         trial_dur = sum([self.MRIObj.soma_event_time_in_sec[name] for name in self.MRIObj.soma_trial_order])/self.MRIObj.TR
 
-        ## define DM [TR, conditions]
-        # initialize at 0
-        design_array = np.zeros((nr_TRs, len(self.soma_cond_unique)))
+        if sing_trial == True:
+            ## define DM [TR, conditions]
+            # initialize at 0
+            design_array = np.zeros((nr_TRs, len(self.soma_stim_labels)))
 
-        # fill it with ones on stim onset
-        for t, trl_cond in enumerate(self.soma_stim_labels):
+            # fill it with ones on stim onset
+            for t, trl_cond in enumerate(self.soma_stim_labels):
+                
+                # fill it 
+                design_array[int(start_baseline_dur + t*trial_dur), t] = 1
+                #print(int(start_baseline_dur + t*trial_dur))
+
+        else:
+            ## define DM [TR, conditions]
+            # initialize at 0
+            design_array = np.zeros((nr_TRs, len(self.soma_cond_unique)))
+
+            # fill it with ones on stim onset
+            for t, trl_cond in enumerate(self.soma_stim_labels):
+                
+                # index for condition column
+                cond_ind = np.where(self.soma_cond_unique == trl_cond)[0][0]
+                
+                # fill it 
+                design_array[int(start_baseline_dur + t*trial_dur), cond_ind] = 1
+                #print(int(start_baseline_dur + t*trial_dur))
             
-            # index for condition column
-            cond_ind = np.where(self.soma_cond_unique == trl_cond)[0][0]
-            
-            # fill it 
-            design_array[int(start_baseline_dur + t*trial_dur), cond_ind] = 1
-            #print(int(start_baseline_dur + t*trial_dur))
-            
+        # and stack it for each run
+        all_dm = []
+        for r in np.arange(nr_runs):
+            all_dm.append(design_array)
+
+        return all_dm
+
+    def get_dm_from_events(self, participant, nr_TRs = 141, nr_runs = 1, sing_trial = False):
+
+        """
+        get dm from events timing
+        
+        Parameters
+        ----------
+        nr_TRs: int
+            number of TRs in run  
+        sing_trial: bool
+            if we want a dm of unique conditions or of single trial events        
+        """
+        
+        # get events onset
+        events_df = self.get_avg_events(participant, keep_b_evs = True)
+        onset_TR = np.ceil(events_df.onset.values/self.MRIObj.TR).astype(int)
+
+        if sing_trial == True:
+
+            design_array = np.zeros((nr_TRs, len(self.soma_stim_labels)))
+
+            # fill it with ones on stim onset
+            for t, trl_cond in enumerate(self.soma_stim_labels):
+                
+                # fill it 
+                design_array[onset_TR[t], t] = 1
+
+        else:
+            design_array = np.zeros((nr_TRs, len(self.soma_cond_unique)))
+
+            # fill it with ones on stim onset
+            for t, trl_cond in enumerate(self.soma_stim_labels):
+                
+                # index for condition column
+                cond_ind = np.where(self.soma_cond_unique == trl_cond)[0][0]
+                
+                # fill it 
+                design_array[onset_TR[t], cond_ind] = 1
+        
         # and stack it for each run
         all_dm = []
         for r in np.arange(nr_runs):
@@ -1163,8 +1225,9 @@ class GLMsingle_Model(somaModel):
         all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
         
         # make design matrix
-        all_dm = self.get_dm_glmsing(nr_TRs = np.array(all_data).shape[-1], 
-                                   nr_runs = len(self.get_run_list(gii_filenames)))
+        all_dm = self.get_dm_from_events(participant, 
+                                        nr_TRs = np.array(all_data).shape[-1], 
+                                        nr_runs = len(self.get_run_list(gii_filenames)))
 
         ## make new out dir, depeding on our HRF approach
         out_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
