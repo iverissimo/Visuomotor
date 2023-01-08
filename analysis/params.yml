@@ -48,7 +48,7 @@ processing:
 
   crop_TR: 
     soma: 0
-    prf: 4
+    prf: 6
 
   filter:
     soma: 'sg'
@@ -86,7 +86,7 @@ plotting:
     parietal: ['IPS0','IPS1','IPS2+']
     frontal: ['sPCS','iPCS']
 
-    n_TR: 86 # after cropping (original 90)
+    n_TR: 84 # after cropping (original 90)
 
   soma:
     glasser_rois:

@@ -48,6 +48,35 @@ CLI.add_argument("--cmd",
                 help = 'What analysis to run?\n Options: postfmriprep, '
                 )
 
+CLI.add_argument("--wf_dir", 
+                    type = str, 
+                    help="Path to workflow dir, if such if not standard root dirs(None [default] vs /scratch)")
+
+# options for pRF fitting
+CLI.add_argument("--run_type", 
+                default = 'mean_run',
+                help="Type of run to fit (mean of runs [default], 1, loo_run, ...)")
+CLI.add_argument("--fit_hrf", 
+                type = int, 
+                default = 0,
+                help="1/0 - if we want to fit hrf on the data or not [default]")
+CLI.add_argument("--chunk_num", 
+                type = int, 
+                default = None,
+                help="Chunk number to fit")
+CLI.add_argument("--vertex", 
+                type = int, 
+                default = None,
+                help="Vertex number to fit")
+CLI.add_argument("--ROI", 
+                type = str, 
+                default = None,
+                help="ROI name to fit")
+CLI.add_argument("--model2fit", 
+                type = str, 
+                default = 'gauss',
+                help="pRF model name to fit")
+
 # parse the command line
 args = CLI.parse_args()
 
@@ -57,15 +86,47 @@ system_dir = args.system
 exclude_sj = args.exclude
 py_cmd = args.cmd
 
+wf_dir = args.wf_dir
+
+## prf options
+run_type = args.run_type
+fit_hrf = args.fit_hrf
+chunk_num = args.chunk_num
+vertex = args.vertex
+ROI = args.ROI
+model2fit = args.model2fit
+
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
                         base_dir = system_dir, 
-                        exclude_sj = exclude_sj)
+                        exclude_sj = exclude_sj, wf_dir = wf_dir)
 
 ## Run specific command
 if py_cmd == 'postfmriprep':
 
     Visuomotor_data.post_fmriprep_proc()
+
+elif py_cmd == 'fit_prf':
+
+    data_model = prfModel(Visuomotor_data)
+
+    if bool(fit_hrf) == True:
+        data_model.fit_hrf = True
+    else:
+        data_model.fit_hrf = False
+
+    # get participant models, which also will load 
+    # DM and mask it according to participants behavior
+    pp_prf_models = data_model.set_models(participant_list = data_model.MRIObj.sj_num)
+
+    for pp in data_model.MRIObj.sj_num:
+
+        data_model.fit_data(pp, pp_prf_models = pp_prf_models, 
+                            fit_type = run_type, 
+                            chunk_num = chunk_num, vertex = vertex, ROI = ROI,
+                            model2fit = model2fit, outdir = None, save_estimates = True,
+                            xtol = 1e-3, ftol = 1e-4, n_jobs = 8)
+
 
 elif py_cmd == 'fit_glmsingle':
 

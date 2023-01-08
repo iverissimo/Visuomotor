@@ -585,5 +585,99 @@ class somaViewer:
                                                     curvature_brightness = 0.4, curvature_contrast = 0.1)
 
 
+class pRFViewer:
+
+    def __init__(self, pRFModelObj, outputdir = None, pysub = 'fsaverage'):
+        
+        """__init__
+        constructor for class 
+        
+        Parameters
+        ----------
+        pRFModelObj : soma Model object
+            object from one of the classes defined in soma_model
+        outputdir: str
+            path to save plots
+        pysub: str
+            basename of pycortex subject folder, where we drew all ROIs. 
+        """
+
+        # set object to use later on
+        self.pRFModelObj = pRFModelObj
+
+        # if output dir not defined, then make it in derivatives
+        if outputdir is None:
+            self.outputdir = op.join(self.pRFModelObj.MRIObj.derivatives_pth, 'plots')
+        else:
+            self.outputdir = outputdir
+
+        # set font type for plots globally
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['font.sans-serif'] = 'Helvetica'
+
+        # pycortex subject to use
+        self.pysub = pysub
+
+    def plot_vertex_tc(self, participant, vertex = None, run_type = 'mean_run', fit_now = True,
+                            model2fit = 'gauss', chunk_num = None, ROI = None, fit_hrf = False):
+
+        """
+        quick function to 
+        plot vertex timeseries and model fit 
+        """
+
+        fig_pth = op.join(self.outputdir, 'prf_single_vertex', 
+                                            'sub-{sj}'.format(sj = participant), run_type)
+        # if output path doesn't exist, create it
+        os.makedirs(fig_pth, exist_ok = True)
+
+        # get participant models, which also will load 
+        # DM and mask it according to participants behavior
+        pp_prf_models = self.pRFModelObj.set_models(participant_list = self.pRFModelObj.MRIObj.sj_num)
+
+        if fit_now:
+
+            if fit_hrf:
+                self.pRFModelObj.fit_hrf = True
+            else:
+                self.pRFModelObj.fit_hrf = False
+
+            estimates, chunk2fit =  self.pRFModelObj.fit_data(participant, pp_prf_models = pp_prf_models, 
+                                                fit_type = run_type, 
+                                                chunk_num = chunk_num, vertex = vertex, ROI = ROI,
+                                                model2fit = model2fit, save_estimates = False,
+                                                xtol = 1e-3, ftol = 1e-4, n_jobs = 8)
+
+            if fit_hrf:
+                model_arr = pp_prf_models['sub-{sj}'.format(sj = participant)]['{name}_model'.format(name = model2fit)].return_prediction(*list(estimates['it_{name}'.format(name = model2fit)][0, :-3]))
+            else:
+                model_arr = pp_prf_models['sub-{sj}'.format(sj = participant)]['{name}_model'.format(name = model2fit)].return_prediction(*list(estimates['it_{name}'.format(name = model2fit)][0, :-1]))
+
+            r2 = estimates['it_{name}'.format(name = model2fit)][0][-1]
+
+        ## actually plot, for all runs
+        time_sec = np.linspace(0, chunk2fit.shape[-1] * self.pRFModelObj.MRIObj.TR, 
+                                num = chunk2fit.shape[-1]) 
+
+        data_color = '#db3050'
+
+        fig, axis = plt.subplots(1,figsize=(15,7.5),dpi=100)
+
+        # plot data with model
+        axis.plot(time_sec, model_arr[0], 
+                    c = data_color, lw = 3, label = 'R$^2$ = %.2f'%r2, zorder = 1)
+        axis.scatter(time_sec, chunk2fit[0], 
+                        marker = 'v', s = 15, c = data_color)
+        axis.set_xlabel('Time (s)',fontsize = 20, labelpad = 20)
+        axis.set_ylabel('BOLD signal change (%)', fontsize = 20, labelpad = 10)
+        axis.tick_params(axis='both', labelsize=18)
+        axis.set_xlim(0, chunk2fit.shape[-1] * self.pRFModelObj.MRIObj.TR)
+
+        handles,labels = axis.axes.get_legend_handles_labels()
+        axis.legend(handles,labels,loc='upper left',fontsize=15)   
+
+        fig.savefig(op.join(fig_pth,'vertex-%i_model-%s_timeseries.png'%(vertex, model2fit)), dpi=100,bbox_inches = 'tight')
+
+
 
 

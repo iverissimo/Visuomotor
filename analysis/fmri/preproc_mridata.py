@@ -81,7 +81,10 @@ class VisuomotorData:
         ## get session number (can be more than one)
         self.session = {}
         for s in self.sj_num:
-            self.session['sub-{sj}'.format(sj=s)] = [op.split(val)[-1] for val in glob.glob(op.join(self.sourcedata_pth, 'sub-{sj}'.format(sj=s), 'ses-*')) if 'anat' not in val] 
+            if wf_dir is not None:
+                print('WARNING, working in a temp dir so sourcedata might not be there')
+            else:
+                self.session['sub-{sj}'.format(sj=s)] = [op.split(val)[-1] for val in glob.glob(op.join(self.sourcedata_pth, 'sub-{sj}'.format(sj=s), 'ses-*')) if 'anat' not in val] 
         
 
 class BehData(VisuomotorData):
