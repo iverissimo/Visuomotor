@@ -103,7 +103,7 @@ plotting:
                 '7AL', 'LIPv', 'VIP', '7Am', 'PF', '7PL', 'MIP']
       frontal: ['4', '6d', '6mp', '6v', 'FEF', '6a', '6ma', '6r', '55b', 'PEF']
       medial: ['5m', '5L', '24dd', '5mv', 'SCEF', '24dv', '23c', 'p24pr']
-      operculum_insular: ['43', 'OP1', 'OP4', 'PFcm', 'FOP1', 'OP2‐3',
+      operculum_insular: ['43', 'OP1', 'OP4', 'PFcm', 'FOP1', 'OP2-3',
                           'RI', 'FOP2', 'FOP3', 'Ig', 'A1', 'PSL', 'LBelt',
                           'PBelt', 'A4', 'Pol1', 'Pol2', '52']
 
