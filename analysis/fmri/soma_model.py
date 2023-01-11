@@ -1908,7 +1908,7 @@ class somaRF_Model(somaModel):
         return np.exp(-((x-mu)**2)/(2*sigma**2))
     
     
-    def create_grid_predictions(self, grid_centers, grid_sizes, reg_names = [], design_matrix = []):
+    def create_grid_predictions(self, grid_centers, grid_sizes, reg_names = []):
 
         """ 
             create grid prediction timecourses
@@ -1921,25 +1921,18 @@ class somaRF_Model(somaModel):
             grid array with RF sizes
         reg_names: list/arr
             regressor names (cond)
-        design_matrix: design matrix [TR, cond]
 
         """
 
         # all combinations of center position and size for grid values given
-        self.grid_mus, self.grid_sizes = np.meshgrid(grid_centers, grid_sizes)
+        self.grid_mus, self.grid_sigmas = np.meshgrid(grid_centers, grid_sizes)
 
         ## create grid RFs
         grid_rfs = self.gauss1D_cart(np.arange(len(reg_names))[..., np.newaxis], 
                         mu = self.grid_mus.ravel(), 
-                        sigma = self.grid_sizes.ravel())
+                        sigma = self.grid_sigmas.ravel())
 
-        ## get regressor indices
-        reg_inds = [ind for ind, name in enumerate(self.soma_cond_unique) if name in reg_names]
-
-        ## multiply DM by gauss function
-        grid_prediction = design_matrix[..., reg_inds] @ grid_rfs 
-
-        return grid_prediction # [TR, nr predictions] 
+        return grid_rfs # [nr_betas, nr predictions] 
 
 
     def find_best_pred(self, pred_arr, data_tc):
@@ -1974,17 +1967,64 @@ class somaRF_Model(somaModel):
         return best_pred_ind, slope, r2
 
 
-    def get_grid_params(self, grid_predictions, betas_vert, design_matrix = [], reg_inds = []):
-        
-        
-        # from betas make vertex "timecourse"
-        vert_tc = design_matrix[..., reg_inds].dot(betas_vert[reg_inds])
+    def get_grid_params(self, grid_predictions, betas_vert):
 
-        # first find best grid prediction for vertex
-        best_pred_ind, slope, r2 = self.find_best_pred(grid_predictions, vert_tc)
+        """
+        fit grid predictions, and return best fitting
+        center, size, slope and r2
+        """
+        
+        if np.isnan(betas_vert).any(): # if nan values, then return nan
+            return {'mu': np.nan, 'size': np.nan, 'slope': np.nan,'r2': np.nan}
 
-        # return grid params in dict
-        return {'mu': self.grid_mus.ravel()[best_pred_ind],
-                'size': self.grid_sizes.ravel()[best_pred_ind],
-                'slope': slope,
-                'r2': r2}
+        else:
+            # first find best grid prediction for vertex
+            best_pred_ind, slope, r2 = self.find_best_pred(grid_predictions, betas_vert)
+
+            # return grid params in dict
+            return {'mu': self.grid_mus.ravel()[best_pred_ind],
+                    'size': self.grid_sigmas.ravel()[best_pred_ind],
+                    'slope': slope,
+                    'r2': r2}
+
+    
+    def fit_betas(self, betas, regressor_names = [], region2fit = None, nr_grid = 100, n_jobs = 8):
+
+        """
+        given a data array [vertex, betas]
+        fit gaussian population Response Field 
+        for betas of region
+
+         Parameters
+        ----------
+        betas: arr
+            data to be fitted [vertex, betas]. 
+            betas must be in same number as regressor_names (columns of design matrix)
+        regressor_names: list
+            list with all regressor names, in same order as betas
+        region2fit: str
+            region that we are fitting (face, right_hand, left_hand)
+
+        """
+
+        # set list with regressor names for given region
+        regs2fit = self.MRIObj.params['fitting']['soma']['all_contrasts'][region2fit]
+
+        # make grid of center position and size
+        grid_center = np.linspace(0, len(regs2fit), nr_grid) - .5
+        grid_size = np.linspace(0.2, len(regs2fit), nr_grid)
+
+        # create grid predictions
+        grid_predictions = self.create_grid_predictions(grid_center, grid_size, reg_names = regs2fit)
+
+        ## get regressor indices
+        reg_inds = [ind for ind, name in enumerate(regressor_names) if name in regs2fit]
+        # and only select those vertices
+        betas2fit = betas[...,reg_inds]
+
+        ## actually fit
+        results = Parallel(n_jobs=n_jobs)(delayed(self.get_grid_params)(grid_predictions,
+                                                                    betas2fit[vert])
+                                                                for vert in tqdm(range(betas2fit.shape[0])))
+
+        return results
