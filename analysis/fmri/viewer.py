@@ -13,6 +13,7 @@ from  matplotlib.ticker import FuncFormatter
 from visuomotor_utils import normalize, add_alpha2colormap
 
 import cortex
+import click_viewer
 
 class somaViewer:
 
@@ -46,6 +47,56 @@ class somaViewer:
 
         # pycortex subject to use
         self.pysub = pysub
+
+    
+    def open_click_viewer(self, participant, custom_dm = True):
+
+        """
+        quick function to open click viewer, need to re furbish later
+        """
+
+        # get list with gii files
+        gii_filenames = self.somaModelObj.get_soma_file_list(participant, 
+                                    file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
+
+        # load data of all runs
+        all_data = self.somaModelObj.load_data4fitting(gii_filenames) # [runs, vertex, TR]
+
+        # average runs
+        data2fit = np.nanmean(all_data, axis = 0)
+
+        # load GLM estimates, and get betas and prediction
+        soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+        betas = soma_estimates['betas']
+        prediction = soma_estimates['prediction']
+        r2 = soma_estimates['r2']
+
+        ## Load click viewer plotted object
+        click_plotter = click_viewer.visualize_on_click(self.somaModelObj.MRIObj, 
+                                                        SomaModelObj = self.somaModelObj,
+                                                        soma_data = data2fit,
+                                                        pysub = self.pysub)
+
+        ## set figure, and also load estimates and models
+        click_plotter.set_figure(participant, custom_dm = custom_dm)
+
+        ## soma rsq
+        click_plotter.images['Soma_rsq'] = cortex.Vertex(r2, 
+                                                        'fsaverage',
+                                                        vmin = 0, vmax = 1, 
+                                                        cmap = 'Reds')
+
+        cortex.quickshow(click_plotter.images['Soma_rsq'], fig = click_plotter.flatmap_ax,
+                                with_rois = False, with_curvature = True, with_colorbar=False, 
+                                with_sulci = True, with_labels = False)
+
+        click_plotter.full_fig.canvas.mpl_connect('button_press_event', click_plotter.onclick)
+        click_plotter.full_fig.canvas.mpl_connect('key_press_event', click_plotter.onkey)
+
+        plt.show()
+
+
 
     def plot_glasser_rois(self):
 
@@ -445,7 +496,7 @@ class somaViewer:
                                         with_colorbar=False,with_curvature=True,with_sulci=True)
 
 
-    def plot_COM_maps(self, participant, region = 'face', n_bins = 256, plot_cuttout = False):
+    def plot_COM_maps(self, participant, region = 'face', n_bins = 256, plot_cuttout = False, custom_dm = True):
 
         """
         plot COM maps from GLM betas
@@ -466,7 +517,7 @@ class somaViewer:
         region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
 
         # call COM function
-        self.somaModelObj.make_COM_maps(participant, region = region)
+        self.somaModelObj.make_COM_maps(participant, region = region, custom_dm = custom_dm)
 
         ## load COM values and plot
         if region == 'face':

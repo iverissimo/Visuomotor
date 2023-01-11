@@ -13,8 +13,6 @@ from preproc_mridata import MRIData
 from soma_model import GLMsingle_Model, GLM_Model
 from prf_model import prfModel
 
-from viewer import somaViewer
-
 # defined command line options
 # this also generates --help and error handling
 CLI = argparse.ArgumentParser()
@@ -140,9 +138,12 @@ elif py_cmd == 'fit_glm':
 
     data_model = GLM_Model(Visuomotor_data)
 
+    # if we want nilearn dm or custom 
+    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+
     ## loop over all subjects 
     for pp in Visuomotor_data.sj_num:
-        data_model.fit_data(pp, fit_type = 'mean_run', hrf_model = 'glover')
+        data_model.fit_data(pp, fit_type = 'mean_run', custom_dm = custom_dm)
 
 elif py_cmd == 'stats_glmsingle':
 
@@ -156,9 +157,13 @@ elif py_cmd == 'stats_glm':
 
     data_model = GLM_Model(Visuomotor_data)
 
+    # if we want nilearn dm or custom 
+    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+
     ## loop over all subjects 
     for pp in Visuomotor_data.sj_num:
-        data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
+        data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
+                                        custom_dm = custom_dm)
 
 
 

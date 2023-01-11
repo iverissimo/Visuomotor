@@ -72,6 +72,9 @@ Visuomotor_data = MRIData(params, sj,
 if model_name == 'glm':
     data_model = GLM_Model(Visuomotor_data)
 
+    # if we want nilearn dm or custom 
+    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+
 elif model_name == 'glmsingle':
     data_model = GLMsingle_Model(Visuomotor_data)
 
@@ -99,7 +102,12 @@ elif py_cmd == 'COM_maps': # center of mass maps for standard GLM over average o
 
     ## loop over all subjects 
     for pp in Visuomotor_data.sj_num:
-        plotter.plot_COM_maps(pp, region = region)
+        plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm)
+
+
+elif py_cmd == 'show_click':
+
+    plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm)
 
 
 

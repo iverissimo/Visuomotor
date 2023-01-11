@@ -10,6 +10,7 @@ import nibabel as nib
 
 from nilearn.glm.first_level import make_first_level_design_matrix
 from nilearn.plotting import plot_design_matrix
+from nilearn.glm.first_level.hemodynamic_models import spm_hrf, spm_time_derivative, spm_dispersion_derivative
 
 import datetime
 
@@ -483,6 +484,99 @@ class somaModel:
 
         return events_avg
 
+    def create_hrf_tc(self, hrf_params=[1.0, 1.0, 0.0], osf = 1, onset = 0):
+        
+        """
+
+        construct single or multiple HRFs - taken from prfpy     
+        Parameters
+        ----------
+        hrf_params : TYPE, optional
+            DESCRIPTION. The default is [1.0, 1.0, 0.0].
+        Returns
+        -------
+        hrf : ndarray
+            the hrf.
+        """
+
+        hrf = np.array(
+            [
+                np.ones_like(hrf_params[1])*hrf_params[0] *
+                spm_hrf(
+                    tr=self.MRIObj.TR,
+                    oversampling=osf,
+                    onset=onset,
+                    time_length=40)[...,np.newaxis],
+                hrf_params[1] *
+                spm_time_derivative(
+                    tr=self.MRIObj.TR,
+                    oversampling=osf,
+                    onset=onset,
+                    time_length=40)[...,np.newaxis],
+                hrf_params[2] *
+                spm_dispersion_derivative(
+                    tr=self.MRIObj.TR,
+                    oversampling=osf,
+                    onset=onset,
+                    time_length=40)[...,np.newaxis]]).sum(
+            axis=0)                    
+
+        return hrf.T/hrf.T.max()
+
+    def convolve_tc_hrf(self, tc, hrf, pad_length = 20):
+        """
+        Helper function to
+        Convolve timecourse with hrf
+        
+        Parameters
+        ----------
+        tc : ndarray, 1D or 2D
+            The timecourse(s) to be convolved.
+        hrf : ndarray, 1D or 2D
+            The HRF
+        Returns
+        -------
+        convolved_tc : ndarray
+            Convolved timecourse.
+        """
+        #scipy fftconvolve does not have padding options so doing it manually
+        pad = np.tile(tc[:,0], (pad_length,1)).T
+        padded_tc = np.hstack((pad,tc))
+
+        convolved_tc = scipy.signal.fftconvolve(padded_tc, hrf, axes=(-1))[..., pad_length:tc.shape[-1]+pad_length] 
+
+        return convolved_tc
+
+    def resample_arr(self, upsample_data, osf = 10, final_sf = 1.6):
+
+        """ resample array
+        using cubic interpolation
+        
+        Parameters
+        ----------
+        upsample_data : arr
+            1d array that is upsampled
+        osf : int
+            oversampling factor (that data was upsampled by)
+        final_sf: float
+            final sampling rate that we want to obtain
+            
+        """
+        
+        # original scale of data in seconds
+        original_scale = np.arange(0, upsample_data.shape[-1]/osf, 1/osf)
+
+        # cubic interpolation of predictor
+        interp = scipy.interpolate.interp1d(original_scale, 
+                                    upsample_data, 
+                                    kind = "linear", axis=-1) #"cubic", axis=-1)
+        
+        desired_scale = np.arange(0, upsample_data.shape[-1]/osf, final_sf) # we want the predictor to be sampled in TR
+
+        out_arr = interp(desired_scale)
+        
+        return out_arr
+
 
 class GLM_Model(somaModel):
 
@@ -507,6 +601,55 @@ class GLM_Model(somaModel):
             self.outputdir = op.join(self.MRIObj.derivatives_pth, 'glm_fits')
         else:
             self.outputdir = outputdir
+
+
+    def make_custom_dm(self, events_df, osf = 100, data_len_TR = 141, 
+                            TR = 1.6, hrf_params = [1,1,0], hrf_onset = 0):
+
+        """
+        Helper function to make custom dm, 
+        from custom HRF
+        """
+
+        # list with regressor names
+        regressor_names = events_df.trial_type.unique()
+
+        # task duration in seconds
+        task_dur_sec = data_len_TR * TR 
+
+        # hrf timecourse in sec * TR !!
+        hrf_tc = self.create_hrf_tc(hrf_params=hrf_params, osf = osf * TR, onset = hrf_onset)
+
+        all_regs_dict = {}
+
+        # for each regressor
+        for ind, reg_name in enumerate(regressor_names):
+
+            onsets = (events_df[events_df['trial_type'] == reg_name].onset.values * osf).astype(int)
+            stim_dur = (events_df[events_df['trial_type'] == reg_name].duration.values * osf).astype(int)
+
+            reg_pred_osf = np.zeros(int(task_dur_sec * osf)) # oversampled array to be filled with predictor onset and dur
+
+            for i in range(len(onsets)): ## fill in regressor with ones, given onset and stim duration
+                reg_pred_osf[onsets[i]:int(onsets[i]+stim_dur[i])] = 1
+
+            # now convolve with hrf
+            reg_pred_osf_conv = self.convolve_tc_hrf(reg_pred_osf[np.newaxis,...], 
+                                                    hrf_tc, 
+                                                    pad_length = 20 * osf)
+
+            # and resample back to TR 
+            reg_resampled = self.resample_arr(reg_pred_osf_conv[0], osf = osf, final_sf = TR)/(osf) # dividing by osf so amplitude scaling not massive (but irrelevante because a.u.)
+            #reg_resampled/=reg_resampled.max()
+            
+            all_regs_dict[reg_name] = reg_resampled
+            
+        # add intercept
+        all_regs_dict['constant'] = np.ones(data_len_TR)
+        # convert to DF
+        dm_df = pd.DataFrame.from_dict(all_regs_dict)
+
+        return dm_df
 
 
     def fit_glm_tc(self, voxel, dm):
@@ -538,7 +681,8 @@ class GLM_Model(somaModel):
         
         return prediction, betas, r2, mse
 
-    def contrast_regions(self, participant, hrf_model = 'glover', z_threshold = 3.1, pval_1sided = True):
+    def contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True,
+                                            z_threshold = 3.1, pval_1sided = True):
 
         """ Make simple contrasts to localize body regions
         (body, hands, legs) and contralateral regions (R vs L hand)
@@ -568,14 +712,24 @@ class GLM_Model(somaModel):
         # make average event file for pp, based on events file
         events_avg = self.get_avg_events(participant)
 
-        # specifying the timing of fMRI frames
-        frame_times = self.MRIObj.TR * (np.arange(avg_data.shape[-1]))
+        if custom_dm: # if we want to make the dm 
 
-        # Create the design matrix, hrf model containing Glover model 
-        design_matrix = make_first_level_design_matrix(frame_times,
-                                                    events = events_avg,
-                                                    hrf_model = hrf_model
-                                                    )
+            design_matrix = self.make_custom_dm(events_avg, 
+                                                osf = 100, data_len_TR = avg_data.shape[-1], 
+                                                TR = self.MRIObj.TR, 
+                                                hrf_params = [1,1,0], hrf_onset = 0)
+            hrf_model = 'custom'
+
+        else: # if we want to use nilearn function
+
+            # specifying the timing of fMRI frames
+            frame_times = self.MRIObj.TR * (np.arange(avg_data.shape[-1]))
+
+            # Create the design matrix, hrf model containing Glover model 
+            design_matrix = make_first_level_design_matrix(frame_times,
+                                                        events = events_avg,
+                                                        hrf_model = hrf_model
+                                                        )
 
         ## load estimates, and get betas and prediction
         soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
@@ -673,7 +827,7 @@ class GLM_Model(somaModel):
                 
                 np.save(LR_stats_filename, LR_stats_dict)
     
-    def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover'):
+    def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', custom_dm = True):
 
         """ fit glm model to participant data (averaged over runs)
         
@@ -722,14 +876,24 @@ class GLM_Model(somaModel):
         # make average event file for pp, based on events file
         events_avg = self.get_avg_events(participant)
 
-        # specifying the timing of fMRI frames
-        frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
+        if custom_dm: # if we want to make the dm 
 
-        # Create the design matrix, hrf model containing Glover model 
-        design_matrix = make_first_level_design_matrix(frame_times,
-                                                    events = events_avg,
-                                                    hrf_model = hrf_model
-                                                    )
+            design_matrix = self.make_custom_dm(events_avg, 
+                                                osf = 100, data_len_TR = data2fit.shape[-1], 
+                                                TR = self.MRIObj.TR, 
+                                                hrf_params = [1,1,0], hrf_onset = 0)
+            hrf_model = 'custom'
+
+        else: # if we want to use nilearn function
+
+            # specifying the timing of fMRI frames
+            frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
+
+            # Create the design matrix, hrf model containing Glover model 
+            design_matrix = make_first_level_design_matrix(frame_times,
+                                                        events = events_avg,
+                                                        hrf_model = hrf_model
+                                                        )
 
         # plot design matrix and save just to check if everything fine
         plot = plot_design_matrix(design_matrix)
@@ -772,7 +936,7 @@ class GLM_Model(somaModel):
                         end_time = end_time,
                         dur  = end_time - start_time))
         
-    def make_COM_maps(self, participant, region = 'face',
+    def make_COM_maps(self, participant, region = 'face', custom_dm = True,
                         hrf_model = 'glover', z_threshold = 3.1):
 
         """ Make COM maps for a specific region
@@ -823,14 +987,24 @@ class GLM_Model(somaModel):
         # make average event file for pp, based on events file
         events_avg = self.get_avg_events(participant)
 
-        # specifying the timing of fMRI frames
-        frame_times = self.MRIObj.TR * (np.arange(prediction.shape[-1]))
+        if custom_dm: # if we want to make the dm 
 
-        # Create the design matrix, hrf model containing Glover model 
-        design_matrix = make_first_level_design_matrix(frame_times,
-                                                    events = events_avg,
-                                                    hrf_model = hrf_model
-                                                    )
+            design_matrix = self.make_custom_dm(events_avg, 
+                                                osf = 100, data_len_TR = prediction.shape[-1], 
+                                                TR = self.MRIObj.TR, 
+                                                hrf_params = [1,1,0], hrf_onset = 0)
+            hrf_model = 'custom'
+
+        else: # if we want to use nilearn function
+
+            # specifying the timing of fMRI frames
+            frame_times = self.MRIObj.TR * (np.arange(prediction.shape[-1]))
+
+            # Create the design matrix, hrf model containing Glover model 
+            design_matrix = make_first_level_design_matrix(frame_times,
+                                                        events = events_avg,
+                                                        hrf_model = hrf_model
+                                                        )
         ## get beta values for region 
         # and z mask
         if region == 'face':
@@ -1688,7 +1862,7 @@ class GLMsingle_Model(somaModel):
         return binary_mask
 
 
-class somaRF_Model(GLMsingle_Model):
+class somaRF_Model(somaModel):
 
     def __init__(self, MRIObj, outputdir = None):
         
