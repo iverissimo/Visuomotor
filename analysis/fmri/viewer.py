@@ -731,4 +731,52 @@ class pRFViewer:
 
 
 
+    def plot_prf_results(self, participant_list = [], 
+                                fit_type = 'mean_run', prf_model_name = 'gauss', max_ecc_ext = 5,
+                                mask_arr = True, rsq_threshold = .1, iterative = True, figures_pth = None):
+
+
+        ## stores estimates for all participants in dict, for ease of access
+        group_estimates = {}
+  
+        for pp in participant_list:
+
+            print('Loading iterative estimates')
+
+            ## load estimates
+            pp_prf_est_dict, pp_prf_models = self.pRFModelObj.load_pRF_model_estimates(pp, 
+                                                                                fit_type = fit_type, 
+                                                                                model_name = prf_model_name, 
+                                                                                iterative = iterative, 
+                                                                                fit_hrf = self.pRFModelObj.fit_hrf)
+
+            ## mask the estimates, if such is the case
+            if mask_arr:
+                print('masking estimates')
+
+                # get estimate keys
+                keys = self.pRFModelObj.get_prf_estimate_keys(prf_model_name = prf_model_name)
+
+                # get screen limits
+                max_ecc_ext = pp_prf_models['sub-{sj}'.format(sj = pp)]['prf_stim'].screen_size_degrees/2
+
+                group_estimates['sub-{sj}'.format(sj = pp)] = self.pRFModelObj.mask_pRF_model_estimates(pp_prf_est_dict, 
+                                                                            ROI = None,
+                                                                            estimate_keys = keys,
+                                                                            x_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                            y_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                            rsq_threshold = rsq_threshold,
+                                                                            pysub = self.pysub
+                                                                            )
+
+            else:
+                group_estimates['sub-{sj}'.format(sj = pp)] = pp_prf_est_dict
+
+
+        ## Now actually plot results
+        # 
+        ### RSQ ###
+        # self.plot_rsq(participant_list = participant_list, group_estimates = group_estimates, ses = ses, run_type = run_type,
+        #                                     model_name = prf_model_name, figures_pth = figures_pth)
+
 

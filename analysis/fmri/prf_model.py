@@ -965,7 +965,7 @@ class prfModel:
 
         if not op.exists(filename) or overwrite:
         
-            for ch in np.arange(self.total_chunks['pRF']):
+            for ch in np.arange(self.total_chunks):
                 
                 # if we are fitting HRF, then we want to look for those files
                 if fit_hrf:
@@ -1098,6 +1098,137 @@ class prfModel:
             print('file already exists, loading %s'%filename)
         
         return np.load(filename)
+
+
+    def load_pRF_model_estimates(self, participant, fit_type = 'mean_run', 
+                                model_name = None, iterative = True, fit_hrf = False):
+
+        """
+        Helper function to load pRF model estimates
+        when they already where fitted and save in out folder
+        Parameters
+        ----------
+        participant: str
+            participant ID
+        fit_type: str
+            run type we fitted
+        model_name: str or None
+            model name to be loaded (if None defaults to class model)
+        iterative: bool
+            if we want to load iterative fitting results [default] or grid results
+        """
+
+        # if model name to load not given, use the one set in the class
+        if model_name:
+            model_name = model_name
+        else:
+            model_name = self.model_type
+
+        # if we want to load iterative results, or grid (iterative = False)
+        if iterative:
+            est_folder = 'it_{model_name}'.format(model_name = model_name)
+        else:
+            est_folder = 'grid_{model_name}'.format(model_name = model_name)
+        
+        # get participant models, which also will load 
+        # DM and mask it according to participants behavior
+        pp_prf_models = self.set_models(participant_list = [participant])
+
+        ## load estimates to make it easier to load later
+        if 'loo_' in fit_type:
+            pRFdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 'loo_run', 
+                                                    'run-{r}'.format(r = str(fit_type[-1]).zfill(2)), est_folder)
+        else:
+            pRFdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, est_folder)
+
+
+        pp_prf_est_dict = self.load_pRF_model_chunks(pRFdir, 
+                                                    fit_model = model_name,
+                                                    basefilename = 'sub-{sj}_task-pRF_'.format(sj = participant),
+                                                    fit_hrf = fit_hrf,
+                                                    iterative = iterative)
+
+        return pp_prf_est_dict, pp_prf_models
+
+
+    def  mask_pRF_model_estimates(self, estimates, ROI = None, x_ecc_lim = [-6,6], y_ecc_lim = [-6,6],
+                                rsq_threshold = .1, pysub = 'fsaverage', 
+                                estimate_keys = ['x','y','size','betas','baseline','r2']):
+    
+        """ 
+        mask estimates, to be positive RF, within screen limits
+        and for a certain ROI (if the case)
+        Parameters
+        ----------
+        estimates : dict
+            dict with estimates key-value pairs
+        ROI : str
+            roi to mask estimates (eg. 'V1', default None)
+        estimate_keys: list/arr
+            list or array of strings with keys of estimates to mask
+        
+        Outputs
+        -------
+        masked_estimates : npz 
+            numpy array of masked estimates
+        
+        """
+        
+        # make new variables that are masked 
+        masked_dict = {}
+        
+        for k in estimate_keys: 
+            masked_dict[k] = np.zeros(estimates[k].shape)
+            masked_dict[k][:] = np.nan
+
+        
+        # set limits for xx and yy, forcing it to be within the screen boundaries
+        # also for positive pRFs
+
+        indices = np.where((~np.isnan(estimates['r2']))& \
+                            (estimates['r2']>= rsq_threshold)& \
+                        (estimates['x'] <= np.max(x_ecc_lim))& \
+                        (estimates['x'] >= np.min(x_ecc_lim))& \
+                        (estimates['y'] <= np.max(y_ecc_lim))& \
+                        (estimates['y'] >= np.min(y_ecc_lim))& \
+                        (estimates['betas']>=0)
+                        )[0]
+                            
+        # save values
+        for k in estimate_keys:
+            masked_dict[k][indices] = estimates[k][indices]
+
+        # if we want to subselect for an ROI
+        if ROI:
+            roi_ind = cortex.get_roi_verts(pysub, ROI) # get indices for that ROI
+            
+            # mask for roi
+            for k in estimate_keys:
+                masked_dict[k] = masked_dict[k][roi_ind[ROI]]
+        
+        return masked_dict
+
+
+    def get_prf_estimate_keys(self, prf_model_name = 'gauss'):
+
+        """ 
+        Helper function to get prf estimate keys
+        
+        Parameters
+        ----------
+        prf_model_name : str
+            pRF model name (defaults to gauss)
+            
+        """
+
+        # get estimate key names, which vary per model used
+        keys = self.MRIObj.params['fitting']['prf']['estimate_keys'][prf_model_name]
+        
+        if self.fit_hrf:
+            keys = keys[:-1]+self.MRIObj.params['fitting']['prf']['estimate_keys']['hrf']+['r2']
+
+        return keys
+
     
 
                
