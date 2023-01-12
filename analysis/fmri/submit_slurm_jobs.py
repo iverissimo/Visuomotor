@@ -46,6 +46,12 @@ CLI.add_argument("--cmd",
                 help = 'What analysis to run?\n Options: fit_prf, '
                 )
 
+CLI.add_argument("--task",
+                type=str,  # any type/callable can be used here
+                default = 'pRF',
+                help = 'What task we want to run? pRF [Default] vs soma'
+                )
+
 # only relevant for pRF fitting
 CLI.add_argument("--prf_model_name", 
                 type = str, 
@@ -92,8 +98,9 @@ exclude_sj = args.exclude
 
 py_cmd = args.cmd
 
-task = 'pRF'
+task = args.task
 model2fit = args.prf_model_name
+
 fit_hrf = args.fit_hrf
 run_type = args.run_type
 chunk_data = args.chunk_data
@@ -129,7 +136,9 @@ slurm_cmd += '#SBATCH --mem={mem}G\n'.format(mem=batch_mem_Gib)
 
 # set fit folder name
 if task == 'pRF':
-    fitfolder = op.join(Visuomotor_data.derivatives_pth, 'pRF_fit')
+    fitfolder = 'pRF_fit'
+elif task == 'soma':
+    fitfolder = 'somaRF_fits'
 
 # batch dir to save .sh files
 batch_dir = '/home/inesv/batch'
@@ -137,50 +146,127 @@ batch_dir = '/home/inesv/batch'
 # loop over participants
 for pp in Visuomotor_data.sj_num:
 
-    # if we're chunking the data, then need to submit each chunk at a time
-    if chunk_data:
-        # total number of chunks
-        total_ch = Visuomotor_data.params['fitting']['prf']['total_chunks']
-        ch_list = np.arange(total_ch)
-    else:
-        ch_list = [None]
+    if task == 'pRF':
 
-    # set fitting model command 
-    for ch in ch_list:
-
-        if ch is None:
-            fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_prf \
-                --run_type {rt} --model2fit {prf_mod} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
-                """.format(pp = pp,
-                        system = system_dir,
-                        ch = ch,
-                        rt = run_type,
-                        prf_mod = model2fit,
-                        ft = fit_hrf)
+        # if we're chunking the data, then need to submit each chunk at a time
+        if chunk_data:
+            # total number of chunks
+            total_ch = Visuomotor_data.params['fitting']['prf']['total_chunks']
+            ch_list = np.arange(total_ch)
         else:
-            fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_prf \
-                --chunk_num {ch} --run_type {rt} --model2fit {prf_mod} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
-                """.format(pp = pp,
-                        system = system_dir,
-                        ch = ch,
-                        rt = run_type,
-                        prf_mod = model2fit,
-                        ft = fit_hrf)
+            ch_list = [None]
+
+        # set fitting model command 
+        for ch in ch_list:
+
+            if ch is None:
+
+                fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_prf \
+    --run_type {rt} --model2fit {prf_mod} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
+    """.format(pp = pp,
+            system = system_dir,
+            rt = run_type,
+            prf_mod = model2fit,
+            ft = fit_hrf)
+
+            else:
+                fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_prf \
+    --chunk_num {ch} --run_type {rt} --model2fit {prf_mod} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
+    """.format(pp = pp,
+            system = system_dir,
+            ch = ch,
+            rt = run_type,
+            prf_mod = model2fit,
+            ft = fit_hrf)
+
+            slurm_cmd = slurm_cmd + """# call the programs
+    $START_EMAIL
+
+    # make derivatives dir in node and sourcedata because we want to access behav files
+    mkdir -p $TMPDIR/derivatives/post_fmriprep/$SPACE/prf/sub-$SJ_NR
+    mkdir -p $TMPDIR/derivatives/$FITFOLDER/sub-$SJ_NR
+    # mkdir -p $TMPDIR/sourcedata/sub-$SJ_NR
+
+    wait
+    cp -r $DERIV_DIR/post_fmriprep/$SPACE/prf/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/$SPACE/prf/
+
+    wait
+
+    # cp -r $SOURCE_DIR/sub-$SJ_NR $TMPDIR/sourcedata/
+
+    wait
+
+    if [ -d "$DERIV_DIR/$FITFOLDER/sub-$SJ_NR" ] 
+    then
+        cp -r $DERIV_DIR/$FITFOLDER/sub-$SJ_NR $TMPDIR/derivatives/$FITFOLDER
+    fi
+
+    wait
+
+    """
+            ### update slurm job script
+            batch_string =  slurm_cmd + """$PY_CMD
+
+    wait          # wait until programs are finished
+
+    rsync -chavzP $TMPDIR/derivatives/ $DERIV_DIR
+
+    wait          # wait until programs are finished
+
+    $END_EMAIL
+    """
+
+            ### if we want to send email
+            if send_email == True:
+                batch_string = batch_string.replace('$START_EMAIL', 'echo "Job $SLURM_JOBID started at `date`" | mail $USER -s "Job $SLURM_JOBID"')
+                batch_string = batch_string.replace('$END_EMAIL', 'echo "Job $SLURM_JOBID finished at `date`" | mail $USER -s "Job $SLURM_JOBID"')
+
+            ## replace other variables
+            working_string = batch_string.replace('$SJ_NR', str(pp).zfill(2))
+            working_string = working_string.replace('$SPACE', Visuomotor_data.sj_space)
+            working_string = working_string.replace('$FITFOLDER', fitfolder)
+            working_string = working_string.replace('$PY_CMD', fit_cmd)
+            working_string = working_string.replace('$BD', batch_dir)
+            working_string = working_string.replace('$DERIV_DIR', Visuomotor_data.derivatives_pth)
+            working_string = working_string.replace('$SOURCE_DIR', Visuomotor_data.sourcedata_pth)
+
+            print(working_string)
+
+            # run it
+            js_name = op.join(batch_dir, '{fname}_sub-{sj}_chunk-{ch}_run-{r}_Visuomotor.sh'.format(fname=fitfolder,
+                                                                                    ch=ch,
+                                                                                    sj=pp,
+                                                                                    r=run_type))
+            of = open(js_name, 'w')
+            of.write(working_string)
+            of.close()
+
+            print('submitting ' + js_name + ' to queue')
+            os.system('sbatch ' + js_name)
+
+
+    elif task == 'soma':
+        fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_RF \
+--run_type {rt} --task soma --model2fit somaRF --fit_hrf {ft} --wf_dir $TMPDIR\n\n
+""".format(pp = pp,
+        system = system_dir,
+        rt = run_type,
+        ft = fit_hrf)
 
         slurm_cmd = slurm_cmd + """# call the programs
 $START_EMAIL
 
 # make derivatives dir in node and sourcedata because we want to access behav files
-mkdir -p $TMPDIR/derivatives/post_fmriprep/$SPACE/prf/sub-$SJ_NR
+mkdir -p $TMPDIR/derivatives/glm_fits/sub-$SJ_NR
 mkdir -p $TMPDIR/derivatives/$FITFOLDER/sub-$SJ_NR
-# mkdir -p $TMPDIR/sourcedata/sub-$SJ_NR
+mkdir -p $TMPDIR/sourcedata/sub-$SJ_NR
 
 wait
-cp -r $DERIV_DIR/post_fmriprep/$SPACE/prf/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/$SPACE/prf/
+cp -r $DERIV_DIR/glm_fits/sub-$SJ_NR $TMPDIR/derivatives/glm_fits/
 
 wait
 
-# cp -r $SOURCE_DIR/sub-$SJ_NR $TMPDIR/sourcedata/
+cp -r $SOURCE_DIR/sub-$SJ_NR $TMPDIR/sourcedata/
 
 wait
 
@@ -192,8 +278,6 @@ fi
 wait
 
 """
-
-
         ### update slurm job script
         batch_string =  slurm_cmd + """$PY_CMD
 
@@ -213,7 +297,6 @@ $END_EMAIL
 
         ## replace other variables
         working_string = batch_string.replace('$SJ_NR', str(pp).zfill(2))
-        working_string = working_string.replace('$SPACE', Visuomotor_data.sj_space)
         working_string = working_string.replace('$FITFOLDER', fitfolder)
         working_string = working_string.replace('$PY_CMD', fit_cmd)
         working_string = working_string.replace('$BD', batch_dir)
@@ -223,8 +306,7 @@ $END_EMAIL
         print(working_string)
 
         # run it
-        js_name = op.join(batch_dir, '{fname}_sub-{sj}_chunk-{ch}_run-{r}_Visuomotor.sh'.format(fname=fitfolder,
-                                                                                ch=ch,
+        js_name = op.join(batch_dir, '{fname}_sub-{sj}_run-{r}_Visuomotor.sh'.format(fname=fitfolder,
                                                                                 sj=pp,
                                                                                 r=run_type))
         of = open(js_name, 'w')

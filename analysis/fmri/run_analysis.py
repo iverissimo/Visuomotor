@@ -46,6 +46,12 @@ CLI.add_argument("--cmd",
                 help = 'What analysis to run?\n Options: postfmriprep, '
                 )
 
+CLI.add_argument("--task",
+                type=str,  # any type/callable can be used here
+                default = 'pRF',
+                help = 'What task we want to run? pRF [Default] vs soma'
+                )
+
 CLI.add_argument("--wf_dir", 
                     type = str, 
                     help="Path to workflow dir, if such if not standard root dirs(None [default] vs /scratch)")
@@ -73,7 +79,7 @@ CLI.add_argument("--ROI",
 CLI.add_argument("--model2fit", 
                 type = str, 
                 default = 'gauss',
-                help="pRF model name to fit")
+                help="pRF/soma model name to fit [gauss, css, glm, glmsingle, somaRF]")
 
 # parse the command line
 args = CLI.parse_args()
@@ -86,13 +92,16 @@ py_cmd = args.cmd
 
 wf_dir = args.wf_dir
 
+# task and model to analyze
+task = args.task
+model2fit = args.model2fit
+
 ## prf options
 run_type = args.run_type
 fit_hrf = args.fit_hrf
 chunk_num = args.chunk_num
 vertex = args.vertex
 ROI = args.ROI
-model2fit = args.model2fit
 
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
@@ -100,74 +109,97 @@ Visuomotor_data = MRIData(params, sj,
                         exclude_sj = exclude_sj, wf_dir = wf_dir)
 
 ## Run specific command
+
+# task agnostic
 if py_cmd == 'postfmriprep':
 
     Visuomotor_data.post_fmriprep_proc()
 
-elif py_cmd == 'fit_prf':
+# if running prf analysis
+if task in ['pRF', 'prf']:
 
+    # load data model
     data_model = prfModel(Visuomotor_data)
 
-    if bool(fit_hrf) == True:
-        data_model.fit_hrf = True
-    else:
-        data_model.fit_hrf = False
+    if py_cmd == 'fit_prf':
 
-    # get participant models, which also will load 
-    # DM and mask it according to participants behavior
-    pp_prf_models = data_model.set_models(participant_list = data_model.MRIObj.sj_num)
+        if bool(fit_hrf) == True:
+            data_model.fit_hrf = True
+        else:
+            data_model.fit_hrf = False
 
-    for pp in data_model.MRIObj.sj_num:
+        # get participant models, which also will load 
+        # DM and mask it according to participants behavior
+        pp_prf_models = data_model.set_models(participant_list = data_model.MRIObj.sj_num)
 
-        data_model.fit_data(pp, pp_prf_models = pp_prf_models, 
-                            fit_type = run_type, 
-                            chunk_num = chunk_num, vertex = vertex, ROI = ROI,
-                            model2fit = model2fit, outdir = None, save_estimates = True,
-                            xtol = 1e-3, ftol = 1e-4, n_jobs = 8)
+        for pp in data_model.MRIObj.sj_num:
 
+            data_model.fit_data(pp, pp_prf_models = pp_prf_models, 
+                                fit_type = run_type, 
+                                chunk_num = chunk_num, vertex = vertex, ROI = ROI,
+                                model2fit = model2fit, outdir = None, save_estimates = True,
+                                xtol = 1e-3, ftol = 1e-4, n_jobs = 8)
 
-elif py_cmd == 'fit_glmsingle':
+elif task == 'soma':
 
-    data_model = GLMsingle_Model(Visuomotor_data)
+    # if standard GLM model or RF model that uses GLM betas
+    if (model2fit == 'glm') or \
+        ((model2fit == 'somaRF') and (Visuomotor_data.params['fitting']['soma']['somaRF']['beta_model'] == 'glm')):
 
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.fit_data(pp)
+        # load data model
+        data_model = GLM_Model(Visuomotor_data)
 
-elif py_cmd == 'fit_glm':
+        # if we want nilearn dm or custom 
+        custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
 
-    data_model = GLM_Model(Visuomotor_data)
+        if py_cmd == 'fit_glm':
+            
+            ## loop over all subjects 
+            for pp in Visuomotor_data.sj_num:
+                data_model.fit_data(pp, fit_type = 'mean_run', custom_dm = custom_dm)
 
-    # if we want nilearn dm or custom 
-    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+        elif py_cmd == 'stats_glm':
 
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.fit_data(pp, fit_type = 'mean_run', custom_dm = custom_dm)
+            ## loop over all subjects 
+            for pp in Visuomotor_data.sj_num:
+                data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
+                                                custom_dm = custom_dm)
 
-elif py_cmd == 'stats_glmsingle':
+        elif py_cmd == 'fit_RF':
 
-    data_model = GLMsingle_Model(Visuomotor_data)
+            ## make RF model object
+            data_RFmodel = somaRF_Model(Visuomotor_data)
 
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.compute_roi_stats(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
-
-elif py_cmd == 'stats_glm':
-
-    data_model = GLM_Model(Visuomotor_data)
-
-    # if we want nilearn dm or custom 
-    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
-
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
+            ## loop over all subjects 
+            for pp in Visuomotor_data.sj_num:
+                data_RFmodel.fit_data(pp, somaModelObj = data_model, betas_model = 'glm',
+                                        fit_type = 'mean_run', nr_grid = 100, n_jobs = 16,
+                                        region_keys = ['face', 'right_hand', 'left_hand'],
                                         custom_dm = custom_dm)
 
 
+    # if standard GLM model or RF model that uses GLM betas
+    elif (model2fit == 'glmsingle') or \
+        ((model2fit == 'somaRF') and (Visuomotor_data.params['fitting']['soma']['somaRF']['beta_model'] == 'glmsingle')):
 
+        # load data model
+        data_model = GLMsingle_Model(Visuomotor_data)
 
+        if py_cmd == 'fit_glmsingle':
+
+            ## loop over all subjects 
+            for pp in Visuomotor_data.sj_num:
+                data_model.fit_data(pp)
+
+        elif py_cmd == 'stats_glmsingle':
+             
+            ## loop over all subjects 
+            for pp in Visuomotor_data.sj_num:
+                data_model.compute_roi_stats(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
+
+        elif py_cmd == 'fit_RF':
+
+            print('Not implemented')
 
 
 

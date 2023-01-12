@@ -2028,3 +2028,77 @@ class somaRF_Model(somaModel):
                                                                 for vert in tqdm(range(betas2fit.shape[0])))
 
         return results
+
+
+    def fit_data(self, participant, somaModelObj = None, betas_model = 'glm',
+                                    fit_type = 'mean_run', nr_grid = 100, n_jobs = 16,
+                                    region_keys = ['face', 'right_hand', 'left_hand'],
+                                    hrf_model = 'glover', custom_dm = True):
+
+        """ fit gauss population Response Field model to participant betas 
+        (from previously run GLM)
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        ## make new out dir, depeding on our HRF approach
+        out_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), betas_model, fit_type)
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
+        # should add an if statement, for the case when we load glm single betas
+        # load GLM estimates, and get betas and prediction
+        soma_estimates = np.load(op.join(somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                        fit_type, 'estimates_run-mean.npy'), allow_pickle=True).item()
+        betas = soma_estimates['betas']
+        prediction = soma_estimates['prediction']
+        r2 = soma_estimates['r2']
+
+        # make average event file for pp, based on events file
+        events_avg = somaModelObj.get_avg_events(participant)
+
+        if custom_dm: # if we want to make the dm 
+
+            # and design matrix
+            design_matrix = somaModelObj.make_custom_dm(events_avg, 
+                                                        osf = 100, data_len_TR = prediction.shape[-1], 
+                                                        TR = self.MRIObj.TR, 
+                                                        hrf_params = [1,1,0], hrf_onset = 0)
+
+            hrf_model = 'custom'
+
+        else: # if we want to use nilearn function
+
+            # specifying the timing of fMRI frames
+            frame_times = self.MRIObj.TR * (np.arange(prediction.shape[-1]))
+
+            # Create the design matrix, hrf model containing Glover model 
+            design_matrix = make_first_level_design_matrix(frame_times,
+                                                        events = events_avg,
+                                                        hrf_model = hrf_model
+                                                        )
+
+        # fit RF model per region
+        for region in region_keys:
+
+            results = self.fit_betas(betas, 
+                                    regressor_names = design_matrix.columns,
+                                    region2fit = region,
+                                    nr_grid = nr_grid, n_jobs = n_jobs)
+
+            # converting dict to proper format
+            final_results = {k: [dic[k] for dic in results] for k in results[0].keys()}
+
+            # save RF estimates dict
+            np.save(op.join(out_dir, 'RF_grid_estimates_region-{r}.npy'), final_results)
+
+        # also save betas and dm in same directory
+        np.save(op.join(out_dir, 'betas_glm.npy'), betas)
+        design_matrix.to_csv(op.join(out_dir, 'DM.csv'), index=False)
+
+
+        
+

@@ -145,6 +145,9 @@ fitting:
     type: 'mean' #'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
     use_nilearn_dm: False
 
+    somaRF:
+      beta_model: 'glm' # glmsingle
+
     all_contrasts:
       face: ['eyebrows',
             'eyes',
