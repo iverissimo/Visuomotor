@@ -681,7 +681,7 @@ class GLM_Model(somaModel):
         
         return prediction, betas, r2, mse
 
-    def contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True,
+    def contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'mean_run',
                                             z_threshold = 3.1, pval_1sided = True):
 
         """ Make simple contrasts to localize body regions
@@ -733,7 +733,8 @@ class GLM_Model(somaModel):
 
         ## load estimates, and get betas and prediction
         soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                        allow_pickle=True).item()
         betas = soma_estimates['betas']
         prediction = soma_estimates['prediction']
 
@@ -937,7 +938,7 @@ class GLM_Model(somaModel):
                         dur  = end_time - start_time))
         
     def make_COM_maps(self, participant, region = 'face', custom_dm = True,
-                        hrf_model = 'glover', z_threshold = 3.1):
+                        hrf_model = 'glover', z_threshold = 3.1, fit_type = 'mean_run'):
 
         """ Make COM maps for a specific region
         given betas from GLM fit
@@ -960,7 +961,8 @@ class GLM_Model(somaModel):
 
         # load GLM estimates, and get betas and prediction
         soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                        allow_pickle=True).item()
         betas = soma_estimates['betas']
         prediction = soma_estimates['prediction']
         r2 = soma_estimates['r2']
@@ -2049,10 +2051,11 @@ class somaRF_Model(somaModel):
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
-        # should add an if statement, for the case when we load glm single betas
+        ####### should add an if statement, for the case when we load glm single betas #####
         # load GLM estimates, and get betas and prediction
         soma_estimates = np.load(op.join(somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        fit_type, 'estimates_run-mean.npy'), allow_pickle=True).item()
+                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                        allow_pickle=True).item()
         betas = soma_estimates['betas']
         prediction = soma_estimates['prediction']
         r2 = soma_estimates['r2']
@@ -2084,6 +2087,8 @@ class somaRF_Model(somaModel):
         # fit RF model per region
         for region in region_keys:
 
+            print('fitting RF model for %s'%region)
+
             results = self.fit_betas(betas, 
                                     regressor_names = design_matrix.columns,
                                     region2fit = region,
@@ -2093,7 +2098,7 @@ class somaRF_Model(somaModel):
             final_results = {k: [dic[k] for dic in results] for k in results[0].keys()}
 
             # save RF estimates dict
-            np.save(op.join(out_dir, 'RF_grid_estimates_region-{r}.npy'), final_results)
+            np.save(op.join(out_dir, 'RF_grid_estimates_region-{r}.npy'.format(r=region)), final_results)
 
         # also save betas and dm in same directory
         np.save(op.join(out_dir, 'betas_glm.npy'), betas)
