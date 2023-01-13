@@ -83,6 +83,9 @@ if task in ['pRF', 'prf']:
     # load data model
     data_model = prfModel(Visuomotor_data)
 
+    # set model to be used
+    data_model.model_type = model_name
+
     ## initialize plotter
     plotter = pRFViewer(data_model)
 
