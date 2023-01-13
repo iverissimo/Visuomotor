@@ -1580,16 +1580,18 @@ def mean_epi_gii(list_filenames, outdir):
     return out_filenames
 
 
-def make_raw_vertex_image(data2plot,cmap,vmin,vmax,subject='fsaverage_meridians'):  
+def make_raw_vertex_image(data1, cmap = 'hot', vmin = 0, vmax = 1, 
+                          data2 = [], vmin2 = 0, vmax2 = 1, subject = 'fsaverage', data2D = False):  
+    
     """ function to fix web browser bug in pycortex
         allows masking of data with nans
     
     Parameters
     ----------
-    data2plot : array
+    data1 : array
         data array
     cmap : str
-        string with colormap name
+        string with colormap name (not the alpha version)
     vmin: int/float
         minimum value
     vmax: int/float 
@@ -1605,33 +1607,43 @@ def make_raw_vertex_image(data2plot,cmap,vmin,vmax,subject='fsaverage_meridians'
     """
     
     # Get curvature
-    curv = cortex.db.get_surfinfo(subject,type='curvature',recache=False)#,smooth=1)
+    curv = cortex.db.get_surfinfo(subject, type = 'curvature', recache=False)#,smooth=1)
     # Adjust curvature contrast / color. Alternately, you could work
-    # with curv.data, maybe threshold it, and apply a color map. 
+    # with curv.data, maybe threshold it, and apply a color map.     
+    curv.data[curv.data>0] = .1
+    curv.data[curv.data<=0] = -.1
+    #curv.data = np.sign(curv.data.data) * .25
+    
     curv.vmin = -1
     curv.vmax = 1
     curv.cmap = 'gray'
     
-    curv.data[curv.data>0] = .1
-    curv.data[curv.data<=0] = -.1
+    # Create display data 
+    vx = cortex.Vertex(data1, subject, cmap = cmap, vmin = vmin, vmax = vmax)
     
-    # Create display data (Face, HANDS, legs)
-    vx = cortex.Vertex(data2plot, subject, cmap=cmap, vmin=vmin, vmax=vmax)
-
-    # Map to RGB
-    vx_rgb = np.vstack([vx.raw.red.data, vx.raw.green.data, vx.raw.blue.data])
-    curv_rgb = np.vstack([curv.raw.red.data, curv.raw.green.data, curv.raw.blue.data])
-
     # Pick an arbitrary region to mask out
     # (in your case you could use np.isnan on your data in similar fashion)
-    alpha = ~np.isnan(data2plot) #(data < 0.2) | (data > 0.4)
+    if data2D:
+        data2[np.isnan(data2)] = vmin2
+        norm2 = matplotlib.colors.Normalize(vmin2, vmax2)  
+        alpha = np.clip(norm2(data2), 0, 1)
+    else:
+        alpha = ~np.isnan(data1) #(data < 0.2) | (data > 0.4)
     alpha = alpha.astype(np.float)
+    
+    # Map to RGB
+    vx_rgb = np.vstack([vx.raw.red.data, vx.raw.green.data, vx.raw.blue.data])
+    vx_rgb[:,alpha>0] = vx_rgb[:,alpha>0] * alpha[alpha>0]
+    
+    curv_rgb = np.vstack([curv.raw.red.data, curv.raw.green.data, curv.raw.blue.data])
+    # do this to avoid artifacts where curvature gets color of 0 valur of colormap
+    curv_rgb[:,np.where((vx_rgb > 0))[-1]] = curv_rgb[:,np.where((vx_rgb > 0))[-1]] * (1-alpha)[np.where((vx_rgb > 0))[-1]]
 
     # Alpha mask
-    display_data = vx_rgb * alpha + curv_rgb * (1-alpha)
+    display_data = curv_rgb + vx_rgb 
 
     # Create vertex RGB object out of R, G, B channels
-    vx_fin = cortex.VertexRGB(*display_data, subject,curvature_brightness = 0.4, curvature_contrast = 0.1)
+    vx_fin = cortex.VertexRGB(*display_data, subject, curvature_brightness = 0.4, curvature_contrast = 0.1)
 
     return vx_fin
 
@@ -1708,4 +1720,92 @@ def correlate_arrs(data1_arr, data2_arr, n_jobs = 4, weights=[], shuffle_axis = 
     correlations = np.array(Parallel(n_jobs=n_jobs)(delayed(np.corrcoef)(data1_arr[i], data2_arr[i]) for i in np.arange(data1_arr.shape[0])))[...,0,1]
             
     return correlations
+
+
+def make_colormap(colormap = 'rainbow_r', bins = 256, add_alpha = True, invert_alpha = False, cmap_name = 'costum',
+                      discrete = False, return_cmap = False):
+
+    """ make custom colormap
+    can add alpha channel to colormap,
+    and save to pycortex filestore
+    Parameters
+    ----------
+    colormap : str or List/arr
+        if string then has to be a matplolib existent colormap
+        if list/array then contains strings with color names, to create linear segmented cmap
+    bins : int
+        number of bins for colormap
+    invert_alpha : bool
+        if we want to invert direction of alpha channel
+        (y can be from 0 to 1 or 1 to 0)
+    cmap_name : str
+        new cmap filename, final one will have _alpha_#-bins added to it
+    discrete : bool
+        if we want a discrete colormap or not (then will be continuous)
+    Outputs
+    -------
+    rgb_fn : str
+        absolute path to new colormap
+    """
+    
+    if isinstance(colormap, str): # if input is string (so existent colormap)
+
+        # get colormap
+        cmap = cm.get_cmap(colormap)
+
+    else: # is list of strings
+        cvals  = np.arange(len(colormap))
+        norm = plt.Normalize(min(cvals),max(cvals))
+        tuples = list(zip(map(norm,cvals), colormap))
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", tuples)
+        
+        if discrete == True: # if we want a discrete colormap from list
+            cmap = matplotlib.colors.ListedColormap(colormap)
+            bins = int(len(colormap))
+
+    # convert into array
+    cmap_array = cmap(range(bins))
+
+    # reshape array for map
+    new_map = []
+    for i in range(cmap_array.shape[-1]):
+        new_map.append(np.tile(cmap_array[...,i],(bins,1)))
+
+    new_map = np.moveaxis(np.array(new_map), 0, -1)
+    
+    if add_alpha: 
+        # make alpha array
+        if invert_alpha == True: # in case we want to invert alpha (y from 1 to 0 instead pf 0 to 1)
+            _, alpha = np.meshgrid(np.linspace(0, 1, bins, endpoint=False), 1-np.linspace(0, 1, bins))
+        else:
+            _, alpha = np.meshgrid(np.linspace(0, 1, bins, endpoint=False), np.linspace(0, 1, bins, endpoint=False))
+
+        # add alpha channel
+        new_map[...,-1] = alpha
+        cmap_ext = (0,1,0,1)
+    else:
+        new_map = new_map[:1,...].copy() 
+        cmap_ext = (0,100,0,1)
+    
+    fig = plt.figure(figsize=(1,1))
+    ax = fig.add_axes([0,0,1,1])
+    # plot 
+    plt.imshow(new_map,
+    extent = cmap_ext,
+    origin = 'lower')
+    ax.axis('off')
+
+    if add_alpha: 
+        rgb_fn = op.join(op.split(cortex.database.default_filestore)[
+                          0], 'colormaps', cmap_name+'_alpha_bins_%d.png'%bins)
+    else:
+        rgb_fn = op.join(op.split(cortex.database.default_filestore)[
+                          0], 'colormaps', cmap_name+'_bins_%d.png'%bins)
+    #misc.imsave(rgb_fn, new_map)
+    plt.savefig(rgb_fn, dpi = 200,transparent=True)
+
+    if return_cmap:
+        return cmap
+    else:
+        return rgb_fn 
     

@@ -10,7 +10,7 @@ import ptitprince as pt # raincloud plots
 import matplotlib.patches as mpatches
 from  matplotlib.ticker import FuncFormatter
 
-from visuomotor_utils import normalize, add_alpha2colormap
+from visuomotor_utils import normalize, add_alpha2colormap, make_raw_vertex_image, make_colormap
 
 import cortex
 import click_viewer
@@ -780,3 +780,178 @@ class pRFViewer:
         #                                     model_name = prf_model_name, figures_pth = figures_pth)
 
 
+    def open_click_viewer(self, participant, fit_type = 'mean_run', prf_model_name = 'gauss', 
+                            max_ecc_ext = 5, mask_arr = True, rsq_threshold = .1):
+
+        """
+        quick function to open click viewer, need to re furbish later
+        """
+
+        ## load estimates and model for participant
+        pp_prf_est_dict, pp_prf_models = self.pRFModelObj.load_pRF_model_estimates(participant, 
+                                                                                fit_type = fit_type, 
+                                                                                model_name = prf_model_name, 
+                                                                                iterative = True, 
+                                                                                fit_hrf = self.pRFModelObj.fit_hrf)
+
+        ## mask the estimates, if such is the case
+        if mask_arr:
+            print('masking estimates')
+
+            # get estimate keys
+            keys = self.pRFModelObj.get_prf_estimate_keys(prf_model_name = prf_model_name)
+
+            # get screen limits
+            max_ecc_ext = pp_prf_models['sub-{sj}'.format(sj = participant)]['prf_stim'].screen_size_degrees/2
+
+            estimates_dict = self.pRFModelObj.mask_pRF_model_estimates(pp_prf_est_dict, 
+                                                                            ROI = None,
+                                                                            estimate_keys = keys,
+                                                                            x_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                            y_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                            rsq_threshold = rsq_threshold,
+                                                                            pysub = self.pysub
+                                                                            )
+        else:
+            estimates_dict = pp_prf_est_dict
+
+        # Load pRF data
+        # get list with gii files
+        gii_filenames = self.pRFModelObj.get_prf_file_list(participant, 
+                                            file_ext = self.pRFModelObj.MRIObj.params['fitting']['prf']['extension'])
+
+        if fit_type == 'mean_run':         
+            # load data of all runs
+            all_data = self.pRFModelObj.load_data4fitting(gii_filenames) # [runs, vertex, TR]
+
+            # average runs
+            data2fit = np.nanmean(all_data, axis = 0)
+
+
+        ## Load click viewer plotted object
+        click_plotter = click_viewer.visualize_on_click(self.pRFModelObj.MRIObj, 
+                                        pRFModelObj = self.pRFModelObj,
+                                        pRF_data = data2fit,
+                                        prf_dm = pp_prf_models['sub-{sj}'.format(sj = participant)]['prf_stim'].design_matrix,
+                                        pysub = self.pysub)
+
+        ## set figure, and also load estimates and models
+        click_plotter.set_figure(participant, task2viz = 'prf', pp_prf_est_dict = estimates_dict,
+                                        pp_prf_models = pp_prf_models,
+                                        prf_run_type = fit_type,  pRFmodel_name = prf_model_name)
+
+        ## calculate pa + ecc + size
+        nan_mask = np.where((np.isnan(estimates_dict['r2'])) | (estimates_dict['r2'] < rsq_threshold))[0]
+        
+        complex_location = estimates_dict['x'] + estimates_dict['y'] * 1j # calculate eccentricity values
+
+        polar_angle = np.angle(complex_location)
+        polar_angle_norm = ((polar_angle + np.pi) / (np.pi * 2.0))
+        polar_angle_norm[nan_mask] = np.nan
+
+        eccentricity = np.abs(complex_location)
+        eccentricity[nan_mask] = np.nan
+        
+        if prf_model_name in ['dn', 'dog']:
+            size_fwhmax, fwatmin = self.pRFModelObj.fwhmax_fwatmin(prf_model_name, estimates_dict)
+        else: 
+            size_fwhmax = self.pRFModelObj.fwhmax_fwatmin(prf_model_name, estimates_dict)
+
+        size_fwhmax[nan_mask] = np.nan
+
+        ## make alpha mask
+        alpha_level = normalize(np.clip(estimates_dict['r2'], rsq_threshold, .5)) # normalize 
+        alpha_level[nan_mask] = np.nan
+        
+        ## pRF rsq
+        click_plotter.images['pRF_rsq'] = self.get_flatmaps(estimates_dict['r2'], 
+                                                            vmin1 = 0, vmax1 = .8,
+                                                            cmap = 'Reds')
+
+        ## pRF Eccentricity
+
+        # make costum colormap
+        ecc_cmap = make_colormap(colormap = ['#dd3933','#f3eb53','#7cb956','#82cbdb','#3d549f'],
+                                            bins = 256, cmap_name = 'ECC_mackey_costum', 
+                                            discrete = False, add_alpha = False, return_cmap = True)
+
+        click_plotter.images['ecc'] = make_raw_vertex_image(eccentricity, 
+                                                            cmap = ecc_cmap, 
+                                                            vmin = 0, vmax = 6, 
+                                                            data2 = alpha_level, 
+                                                            vmin2 = 0, vmax2 = 1, 
+                                                            subject = self.pysub, data2D = True)
+
+        ## pRF Size
+        click_plotter.images['size_fwhmax'] = make_raw_vertex_image(size_fwhmax, 
+                                                    cmap = 'hot', vmin = 0, vmax = 14, 
+                                                    data2 = alpha_level, 
+                                                    vmin2 = 0, vmax2 = 1, 
+                                                    subject = self.pysub, data2D = True)
+
+        ## pRF Polar Angle
+        # get matplotlib color map from segmented colors
+        PA_cmap = make_colormap(colormap = ['#ec9b3f','#f3eb53','#7cb956','#82cbdb',
+                                                    '#3d549f','#655099','#ad5a9b','#dd3933'], bins = 256, 
+                                                    cmap_name = 'PA_mackey_costum',
+                                                    discrete = False, add_alpha = False, return_cmap = True)
+
+        click_plotter.images['PA'] = make_raw_vertex_image(polar_angle_norm, 
+                                                    cmap = PA_cmap, vmin = 0, vmax = 1, 
+                                                    data2 = alpha_level, 
+                                                    vmin2 = 0, vmax2 = 1, 
+                                                    subject = self.pysub, data2D = True)
+
+        ## pRF Exponent 
+        if prf_model_name == 'css':
+
+            click_plotter.images['ns'] = self.get_flatmaps(estimates_dict['ns'], 
+                                                                vmin1 = 0, vmax1 = 1,
+                                                                cmap = 'plasma')
+
+        ## open figure 
+
+        cortex.quickshow(click_plotter.images['pRF_rsq'], fig = click_plotter.flatmap_ax,
+                                with_rois = False, with_curvature = True, with_colorbar=False, 
+                                with_sulci = True, with_labels = False)
+
+        click_plotter.full_fig.canvas.mpl_connect('button_press_event', click_plotter.onclick)
+        click_plotter.full_fig.canvas.mpl_connect('key_press_event', click_plotter.onkey)
+
+        plt.show()
+
+
+    def get_flatmaps(self, est_arr1, est_arr2 = None, 
+                            vmin1 = 0, vmax1 = .8, vmin2 = None, vmax2 = None,
+                            cmap = 'BuBkRd'):
+
+        """
+        Helper function to set and return flatmap  
+        Parameters
+        ----------
+        est_arr1 : array
+            data array
+        cmap : str
+            string with colormap name
+        vmin: int/float
+            minimum value
+        vmax: int/float 
+            maximum value
+        subject: str
+            overlay subject name to use
+        """
+
+        # if two arrays provided, then fig is 2D
+        if est_arr2:
+            flatmap = cortex.Vertex2D(est_arr1, est_arr2,
+                                    self.pysub,
+                                    vmin = vmin1, vmax = vmax1,
+                                    vmin2 = vmin2, vmax2 = vmax2,
+                                    cmap = cmap)
+        else:
+            flatmap = cortex.Vertex(est_arr1, 
+                                    self.pysub,
+                                    vmin = vmin1, vmax = vmax1,
+                                    cmap = cmap)
+
+        return flatmap

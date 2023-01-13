@@ -64,7 +64,7 @@ class visualize_on_click:
             self.point_grid_2D = None
 
 
-    def set_figure(self, participant, 
+    def set_figure(self, participant, pp_prf_est_dict = None, pp_prf_models = None,
                     task2viz = 'soma', prf_run_type = 'mean_run', soma_run_type = 'mean_run',
                     pRFmodel_name = 'css', somamodel_name = 'glm', custom_dm = True):
 
@@ -90,16 +90,19 @@ class visualize_on_click:
         self.pRFmodel_name = pRFmodel_name
         self.somamodel_name = somamodel_name
 
-        # ## load model and prf estimates for that participant
-        # self.pp_prf_est_dict, self.pp_prf_models = self.pRFModelObj.load_pRF_model_estimates(participant, ses = self.session['pRF'], run_type = self.run_type['pRF'], 
-        #                                                                         model_name = pRFmodel_name, iterative = True, fit_hrf = self.pRFModelObj.fit_hrf)
+        # load prf estimates, if they were not provided
+        if self.pRFModelObj is not None:
 
-        # # when loading, dict has key-value pairs stored,
-        # # need to convert it to make it in same format as when fitting on the spot
-        # self.pRF_keys = self.MRIObj.params['mri']['fitting']['pRF']['estimate_keys'][pRFmodel_name]
-        
-        # if self.pRFModelObj.fit_hrf:
-        #     self.pRF_keys = self.pRF_keys[:-1]+self.MRIObj.params['mri']['fitting']['pRF']['estimate_keys']['hrf']+['r2']
+            if pp_prf_est_dict is None:
+                print('Load prf estimates')
+            else:
+                self.pp_prf_est_dict = pp_prf_est_dict
+                self.pp_prf_models = pp_prf_models
+
+            # when loading, dict has key-value pairs stored,
+            # need to convert it to make it in same format as when fitting on the spot
+            self.pRF_keys = self.pRFModelObj.get_prf_estimate_keys(prf_model_name = pRFmodel_name)
+
 
         if self.SomaModelObj is not None:
 
@@ -185,6 +188,74 @@ class visualize_on_click:
             self.betas_ax.set_title('betas')
 
 
+    def get_vertex_prf_model_tc(self, vertex):
+
+        """
+        Get model estimates for that vertex
+        Parameters
+        ----------
+        vertex : int
+            vertex index
+            
+        """
+
+        # if we fitted hrf, need to also get that from params
+        # and set model array
+
+        estimates_arr = np.stack((self.pp_prf_est_dict[val][vertex] for val in self.pRF_keys))
+        
+        # define spm hrf
+        spm_hrf = self.pp_prf_models['sub-{sj}'.format(sj = self.participant)]['{name}_model'.format(name = self.pRFModelObj.model_type)].create_hrf(hrf_params = [1, 1, 0],
+                                                                                                                                                            onset=self.pRFModelObj.hrf_onset)
+
+        if self.pRFModelObj.fit_hrf:
+            hrf = self.pp_prf_models[ 'sub-{sj}'.format(sj = self.participant)]['{name}_model'.format(name = self.pRFModelObj.model_type)].create_hrf(hrf_params = [1.0,
+                                                                                                                                estimates_arr[-3],
+                                                                                                                                estimates_arr[-2]],
+                                                                                                                    onset=self.pRFModelObj.hrf_onset)
+        
+            self.pp_prf_models['sub-{sj}'.format(sj = self.participant)]['{name}_model'.format(name = self.pRFModelObj.model_type)].hrf = hrf
+
+            model_arr = self.pp_prf_models['sub-{sj}'.format(sj = self.participant)]['{name}_model'.format(name = self.pRFModelObj.model_type)].return_prediction(*list(estimates_arr[:-3]))
+        
+        else:
+            self.pp_prf_models['sub-{sj}'.format(sj = self.participant)]['{name}_model'.format(name = self.pRFModelObj.model_type)].hrf = spm_hrf
+
+            model_arr = self.pp_prf_models['sub-{sj}'.format(sj = self.participant)]['{name}_model'.format(name = self.pRFModelObj.model_type)].return_prediction(*list(estimates_arr[:-1]))
+            
+        return model_arr[0], estimates_arr[-1]
+
+
+    def plot_prf_tc(self, axis, timecourse = None, plot_model = True):
+
+        """
+        plot pRF timecourse for model and data
+        Parameters
+        ----------
+        timecourse : arr
+            data time course
+            
+        """
+        
+        # plotting will be in seconds
+        time_sec = np.linspace(0, len(timecourse) * self.MRIObj.TR,
+                               num = len(timecourse)) 
+        
+        axis.plot(time_sec, timecourse,'k--', label = 'data')
+        
+        if plot_model:
+            prediction, r2 = self.get_vertex_prf_model_tc(self.vertex)
+            axis.plot(time_sec, prediction, c = 'red',lw=3,label='model R$^2$ = %.2f'%r2,zorder=1)
+            print('pRF model R$^2$ = %.2f'%r2)
+            
+        axis.set_xlabel('Time (s)')#,fontsize=20, labelpad=20)
+        axis.set_ylabel('BOLD signal change (%)')#,fontsize=20, labelpad=10)
+        axis.set_xlim(0, len(timecourse)*self.MRIObj.TR)
+        #axis.legend(loc='upper left',fontsize=10)  # doing this to guarantee that legend is how I want it
+        
+        return axis
+
+
     def plot_soma_tc(self, axis, timecourse = None, plot_model = True):
 
         """
@@ -235,34 +306,37 @@ class visualize_on_click:
             if self.task2viz in ['both', 'soma']:
                 self.soma_timecourse_ax.clear()
             
-        # self.prf_timecourse_ax = self.plot_prf_tc(self.prf_timecourse_ax, timecourse = self.pRF_data[vertex])
+        if self.task2viz in ['both', 'prf', 'pRF']:
 
-        # plot fa data (and model if provided) 
-        if self.SomaModelObj:
-            self.soma_timecourse_ax = self.plot_soma_tc(self.soma_timecourse_ax, timecourse = self.soma_data[vertex])
-        elif self.soma_data:
-            self.soma_timecourse_ax = self.plot_soma_tc(self.soma_timecourse_ax, timecourse = self.soma_data[vertex], plot_model = False) 
+            self.prf_timecourse_ax = self.plot_prf_tc(self.prf_timecourse_ax, timecourse = self.pRF_data[vertex])
 
-        self.betas_ax.clear()
-        self.betas_ax.bar(np.arange(self.soma_betas.shape[-1]), self.soma_betas[vertex])
-        self.betas_ax.set_xticks(np.arange(self.soma_betas.shape[-1]))
-        self.betas_ax.set_xticklabels(self.soma_regressors, rotation=80)
+            prf = gauss2D_iso_cart(self.point_grid_2D[0],
+                               self.point_grid_2D[1],
+                               mu = (self.pp_prf_est_dict['x'][vertex], 
+                                     self.pp_prf_est_dict['y'][vertex]),
+                               sigma = self.pp_prf_est_dict['size'][vertex]) #, alpha=0.6)
 
-        # prf = gauss2D_iso_cart(self.point_grid_2D[0],
-        #                        self.point_grid_2D[1],
-        #                        mu = (self.pp_prf_est_dict['x'][vertex], 
-        #                              self.pp_prf_est_dict['y'][vertex]),
-        #                        sigma = self.pp_prf_est_dict['size'][vertex]) #, alpha=0.6)
+            self.prf_ax.clear()
+            self.prf_ax.imshow(prf, cmap='cubehelix')
+            self.prf_ax.axvline(self.prf_dm.shape[0]/2, color='white', linestyle='dashed', lw=0.5)
+            self.prf_ax.axhline(self.prf_dm.shape[1]/2, color='white', linestyle='dashed', lw=0.5)
+            #prf_ax.set_title(f"x: {self.pp_prf_est_dict['x'][vertex]}, y: {self.pp_prf_est_dict['y'][vertex]}")
 
-        # self.prf_ax.clear()
-        # self.prf_ax.imshow(prf, cmap='cubehelix')
-        # self.prf_ax.axvline(self.prf_dm.shape[0]/2, color='white', linestyle='dashed', lw=0.5)
-        # self.prf_ax.axhline(self.prf_dm.shape[1]/2, color='white', linestyle='dashed', lw=0.5)
-        #prf_ax.set_title(f"x: {self.pp_prf_est_dict['x'][vertex]}, y: {self.pp_prf_est_dict['y'][vertex]}")
+            # just to check if exponent values make sense
+            if self.pRFModelObj.model_type == 'css':
+                print('pRF exponent = %.2f'%self.pp_prf_est_dict['ns'][vertex])
 
-        # just to check if exponent values make sense
-        # if self.pRFModelObj.model_type['pRF'] == 'css':
-        #     print('pRF exponent = %.2f'%self.pp_prf_est_dict['ns'][vertex])
+        # plot soma data (and model if provided) 
+        if self.task2viz in ['both', 'soma']:
+            if self.SomaModelObj:
+                self.soma_timecourse_ax = self.plot_soma_tc(self.soma_timecourse_ax, timecourse = self.soma_data[vertex])
+            elif self.soma_data:
+                self.soma_timecourse_ax = self.plot_soma_tc(self.soma_timecourse_ax, timecourse = self.soma_data[vertex], plot_model = False) 
+
+            self.betas_ax.clear()
+            self.betas_ax.bar(np.arange(self.soma_betas.shape[-1]), self.soma_betas[vertex])
+            self.betas_ax.set_xticks(np.arange(self.soma_betas.shape[-1]))
+            self.betas_ax.set_xticklabels(self.soma_regressors, rotation=80)
 
 
     def onclick(self, event):
@@ -295,9 +369,34 @@ class visualize_on_click:
         # clear flatmap axis
         self.flatmap_ax.clear()
 
-        if event.key == '1':  # pRF rsq
-            cortex.quickshow(self.images['Soma_rsq'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
-                        fig = self.flatmap_ax, with_colorbar = False)
-            self.flatmap_ax.set_title('Soma rsq')
+        if self.task2viz in ['prf', 'pRF']:
+
+            if event.key == '1':  # pRF rsq
+                cortex.quickshow(self.images['pRF_rsq'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('pRF rsq')
+            elif event.key == '2':  # pRF eccentricity
+                cortex.quickshow(self.images['ecc'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('pRF eccentricity')
+            elif event.key == '3':  # pRF Size
+                cortex.quickshow(self.images['size_fwhmax'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('pRF size (FWHMax)')
+            elif event.key == '4':  # pRF PA
+                cortex.quickshow(self.images['PA'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('pRF PA')
+            elif (event.key == '5') & (self.pRFmodel_name == 'css'):  # pRF exponent
+                cortex.quickshow(self.images['ns'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('pRF exponent')   
+            
+        elif self.task2viz in ['soma']:
+
+            if event.key == '1':  # soma rsq
+                cortex.quickshow(self.images['Soma_rsq'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('Soma rsq')
 
         plt.draw()

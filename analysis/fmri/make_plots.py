@@ -11,8 +11,9 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
 
 from preproc_mridata import MRIData
 from soma_model import GLMsingle_Model, GLM_Model
+from prf_model import prfModel
 
-from viewer import somaViewer
+from viewer import somaViewer, pRFViewer
 
 # defined command line options
 # this also generates --help and error handling
@@ -51,7 +52,13 @@ CLI.add_argument("--model",
                 #nargs="*",
                 type=str,  # any type/callable can be used here
                 required=True,
-                help = 'What model to use?\n Options: glm, glmsingle, somaRF '
+                help = 'What model to use?\n Options: glm, glmsingle, somaRF, gauss '
+                )
+
+CLI.add_argument("--task",
+                type=str,  # any type/callable can be used here
+                default = 'soma',
+                help = 'What task we want to run? pRF vs soma [Default]'
                 )
 
 # parse the command line
@@ -63,51 +70,69 @@ system_dir = args.system
 exclude_sj = args.exclude
 py_cmd = args.cmd
 model_name = args.model
+task = args.task
 
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
                         base_dir = system_dir, 
                         exclude_sj = exclude_sj)
 
-if model_name == 'glm':
-    data_model = GLM_Model(Visuomotor_data)
+# if running prf analysis
+if task in ['pRF', 'prf']:
 
-    # if we want nilearn dm or custom 
-    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+    # load data model
+    data_model = prfModel(Visuomotor_data)
 
-elif model_name == 'glmsingle':
-    data_model = GLMsingle_Model(Visuomotor_data)
+    ## initialize plotter
+    plotter = pRFViewer(data_model)
 
-## initialize plotter
-plotter = somaViewer(data_model)
+    if py_cmd == 'show_click':
 
-## run command
-if py_cmd == 'glmsing_tc': # timcourse for vertex given GLM single average betas for each run
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], fit_type = 'mean_run', 
+                                            prf_model_name = model_name, 
+                                            mask_arr = False, rsq_threshold = .14)
 
-    vertex = ''
-    while len(vertex) == 0:
-        vertex = input("Vertex number to plot?: ")
+elif task == 'soma':
 
-    plotter.plot_glmsingle_tc(Visuomotor_data.sj_num[0], int(vertex))
+    if model_name == 'glm':
+        data_model = GLM_Model(Visuomotor_data)
 
-elif py_cmd == 'glmsing_hex': # hexabin maps for each beta regressor of GLM single, averaged across runs/repetitions
+        # if we want nilearn dm or custom 
+        custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
 
-    plotter.plot_glmsingle_roi_betas(Visuomotor_data.sj_num)
+    elif model_name == 'glmsingle':
+        data_model = GLMsingle_Model(Visuomotor_data)
 
-elif py_cmd == 'COM_maps': # center of mass maps for standard GLM over average of runs
+    ## initialize plotter
+    plotter = somaViewer(data_model)
 
-    region = ''
-    while len(region) == 0:
-        region = input("Which region to plot? (ex: face, upper_limb): ")
+    ## run command
+    if py_cmd == 'glmsing_tc': # timcourse for vertex given GLM single average betas for each run
 
-    ## loop over all subjects 
-    for pp in Visuomotor_data.sj_num:
-        plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm)
+        vertex = ''
+        while len(vertex) == 0:
+            vertex = input("Vertex number to plot?: ")
+
+        plotter.plot_glmsingle_tc(Visuomotor_data.sj_num[0], int(vertex))
+
+    elif py_cmd == 'glmsing_hex': # hexabin maps for each beta regressor of GLM single, averaged across runs/repetitions
+
+        plotter.plot_glmsingle_roi_betas(Visuomotor_data.sj_num)
+
+    elif py_cmd == 'COM_maps': # center of mass maps for standard GLM over average of runs
+
+        region = ''
+        while len(region) == 0:
+            region = input("Which region to plot? (ex: face, upper_limb): ")
+
+        ## loop over all subjects 
+        for pp in Visuomotor_data.sj_num:
+            plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm)
 
 
-elif py_cmd == 'show_click':
+    elif py_cmd == 'show_click':
 
-    plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm)
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm)
 
 
 
