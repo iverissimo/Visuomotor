@@ -49,7 +49,7 @@ class somaViewer:
         self.pysub = pysub
 
     
-    def open_click_viewer(self, participant, custom_dm = True):
+    def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm'):
 
         """
         quick function to open click viewer, need to re furbish later
@@ -81,11 +81,64 @@ class somaViewer:
         ## set figure, and also load estimates and models
         click_plotter.set_figure(participant, custom_dm = custom_dm)
 
+        # if model is GLM, load COM maps 
+        if model2plot == 'glm':
+
+            # normalize the distribution, for better visualization
+            region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
+            
+            ## COM map dir
+            com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant))
+
+            ########## load face plots ##########
+            
+            COM_face = np.load(op.join(com_betas_dir, 'COM_reg-face.npy'), allow_pickle = True)
+
+            # create costume colormp J4
+            n_bins = 256
+            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
+                                                                bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
+
+            click_plotter.images['face'] = cortex.Vertex2D(COM_face, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=3,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = col2D_name)
+
+            ########## load right hand plots ##########
+            
+            COM_RH = np.load(op.join(com_betas_dir, 'COM_reg-upper_limb_R.npy'), allow_pickle = True)
+
+            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
+                                                                    bins = n_bins, 
+                                                                    cmap_name = 'rainbow_r'))[-1])[0]
+
+            click_plotter.images['RH'] = cortex.Vertex2D(COM_RH, 
+                                                        region_mask_alpha,
+                                                        subject = self.pysub,
+                                                        vmin=0, vmax=4,
+                                                        vmin2 = 0, vmax2 = 1,
+                                                        cmap = col2D_name)
+
+            ########## load left hand plots ##########
+            
+            COM_LH = np.load(op.join(com_betas_dir, 'COM_reg-upper_limb_L.npy'), allow_pickle = True)
+
+            click_plotter.images['LH'] = cortex.Vertex2D(COM_LH, 
+                                                        region_mask_alpha,
+                                                        subject = self.pysub,
+                                                        vmin=0, vmax=4,
+                                                        vmin2 = 0, vmax2 = 1,
+                                                        cmap = col2D_name)
+
+
         ## soma rsq
         click_plotter.images['Soma_rsq'] = cortex.Vertex(r2, 
                                                         'fsaverage',
                                                         vmin = 0, vmax = 1, 
-                                                        cmap = 'Reds')
+                                                        cmap = 'Greens')
 
         cortex.quickshow(click_plotter.images['Soma_rsq'], fig = click_plotter.flatmap_ax,
                                 with_rois = False, with_curvature = True, with_colorbar=False, 
@@ -904,10 +957,13 @@ class pRFViewer:
 
         ## pRF Exponent 
         if prf_model_name == 'css':
+            
+            ns = estimates_dict['ns']
+            ns[nan_mask] = np.nan
 
-            click_plotter.images['ns'] = self.get_flatmaps(estimates_dict['ns'], 
-                                                                vmin1 = 0, vmax1 = 1,
-                                                                cmap = 'plasma')
+            click_plotter.images['ns'] = self.get_flatmaps(ns, 
+                                                        vmin1 = 0, vmax1 = 1,
+                                                        cmap = 'plasma')
 
         ## open figure 
 

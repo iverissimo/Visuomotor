@@ -135,7 +135,7 @@ elif task == 'soma':
 
     elif py_cmd == 'show_click':
 
-        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm)
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name)
 
 
 

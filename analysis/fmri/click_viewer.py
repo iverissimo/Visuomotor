@@ -277,7 +277,7 @@ class visualize_on_click:
             prediction = self.soma_prediction[self.vertex]
             r2 = self.soma_r2[self.vertex]
             axis.plot(time_sec, prediction, c = 'blue',lw=3,label='model R$^2$ = %.2f'%r2,zorder=1)
-            print('FA model R$^2$ = %.2f'%r2)
+            print('Soma GLM model R$^2$ = %.2f'%r2)
             
 
         axis.set_xlabel('Time (s)')#,fontsize=20, labelpad=20)
@@ -398,5 +398,17 @@ class visualize_on_click:
                 cortex.quickshow(self.images['Soma_rsq'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
                             fig = self.flatmap_ax, with_colorbar = False)
                 self.flatmap_ax.set_title('Soma rsq')
+            elif event.key == '2':  # soma face
+                cortex.quickshow(self.images['face'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('Soma face')
+            elif event.key == '3':  # soma RH
+                cortex.quickshow(self.images['RH'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('Soma Right Hand')
+            elif event.key == '4':  # soma LH
+                cortex.quickshow(self.images['LH'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('Soma Left Hand')
 
         plt.draw()
