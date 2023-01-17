@@ -20,7 +20,7 @@ general:
       root: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data'
     lisa:
       root: '/project/projects_verissimo/Visuomotor_data'
-
+      batch: '/home/inesv/batch'
 prf:
   PRF_ITI_in_TR: 0.5
   bar_pass_in_TRs:
@@ -31,6 +31,7 @@ prf:
     D-U: 10
 
   bar_pass_direction: ['empty','U-D','R-L','empty','L-R','D-U','empty'] 
+  bar_width_ratio: 0.125
 
 soma:
   event_dur_in_sec:
@@ -110,13 +111,14 @@ plotting:
 fitting:
   prf:
     fit_model: 'gauss' #'css'
-    optimizer: 'L-BFGS-B'
+    optimizer: 'L-BFGS-B' # 'trust-constr'
 
     type: 'mean' #'loo_run' #'median' # type of fitting to do, if leave-one-run-out or average runs and fit on median
 
     extension: 'cropped_dc_psc.func.gii'
 
-    fit_hrf: False #True
+    fit_hrf: True #False #True
+    hrf_onset: 0
 
     total_chunks: 83
 

@@ -71,6 +71,12 @@ CLI.add_argument("--chunk_data",
                 default = 1,
                 help="1/0 - if we want to divide the data into chunks [default] or not")
 
+# nr jobs for parallel
+CLI.add_argument("--n_jobs", 
+                type = int, 
+                default = 16,
+                help="number of jobs for parallel")
+
 # only relevant for LISA/slurm system 
 CLI.add_argument("--node_name", 
                 type = str, 
@@ -105,12 +111,15 @@ fit_hrf = args.fit_hrf
 run_type = args.run_type
 chunk_data = args.chunk_data
 
+n_jobs = args.n_jobs
+
 node_name = args.node_name
 partition_name = args.partition_name
 batch_mem_Gib = args.batch_mem_Gib
 
 run_time = '10:00:00'
 send_email = bool(args.email)
+
 
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
@@ -141,7 +150,7 @@ elif task == 'soma':
     fitfolder = 'somaRF_fits'
 
 # batch dir to save .sh files
-batch_dir = '/home/inesv/batch'
+batch_dir = Visuomotor_data.params['general']['paths']['lisa']['batch']
 
 # loop over participants
 for pp in Visuomotor_data.sj_num:
@@ -162,22 +171,24 @@ for pp in Visuomotor_data.sj_num:
             if ch is None:
 
                 fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_prf \
-    --run_type {rt} --model2fit {prf_mod} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
+    --run_type {rt} --model2fit {prf_mod} --n_jobs {nj} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
     """.format(pp = pp,
             system = system_dir,
             rt = run_type,
             prf_mod = model2fit,
-            ft = fit_hrf)
+            ft = fit_hrf,
+            nj = n_jobs)
 
             else:
                 fit_cmd = """python run_analysis.py --subject {pp} --system {system} --cmd fit_prf \
-    --chunk_num {ch} --run_type {rt} --model2fit {prf_mod} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
+    --chunk_num {ch} --run_type {rt} --model2fit {prf_mod} --n_jobs {nj} --fit_hrf {ft} --wf_dir $TMPDIR\n\n
     """.format(pp = pp,
             system = system_dir,
             ch = ch,
             rt = run_type,
             prf_mod = model2fit,
-            ft = fit_hrf)
+            ft = fit_hrf,
+            nj = n_jobs)
 
             slurm_cmd = slurm_cmd + """# call the programs
     $START_EMAIL

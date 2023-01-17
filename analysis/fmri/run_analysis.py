@@ -43,7 +43,7 @@ CLI.add_argument("--cmd",
                 #nargs="*",
                 type=str,  # any type/callable can be used here
                 required=True,
-                help = 'What analysis to run?\n Options: postfmriprep, '
+                help = 'What analysis to run?\n Options: postfmriprep, fit_prf, fit_glm, etc'
                 )
 
 CLI.add_argument("--task",
@@ -56,18 +56,23 @@ CLI.add_argument("--wf_dir",
                     type = str, 
                     help="Path to workflow dir, if such if not standard root dirs(None [default] vs /scratch)")
 
+CLI.add_argument("--n_jobs", 
+                type = int, 
+                default = 8,
+                help="number of jobs for parallel")
+
 # options for pRF fitting
 CLI.add_argument("--run_type", 
                 default = 'mean_run',
-                help="Type of run to fit (mean of runs [default], 1, loo_run, ...)")
+                help="Type of run to fit (mean_run [default], 1, loo_run, ...)")
 CLI.add_argument("--fit_hrf", 
                 type = int, 
                 default = 0,
-                help="1/0 - if we want to fit hrf on the data or not [default]")
+                help="1/0 - if we want to fit hrf on the data or not [default] - for prf fitting")
 CLI.add_argument("--chunk_num", 
                 type = int, 
                 default = None,
-                help="Chunk number to fit")
+                help="Chunk number to fit - for prf fitting")
 CLI.add_argument("--vertex", 
                 type = int, 
                 default = None,
@@ -91,6 +96,7 @@ exclude_sj = args.exclude
 py_cmd = args.cmd
 
 wf_dir = args.wf_dir
+n_jobs = args.n_jobs
 
 # task and model to analyze
 task = args.task
@@ -123,14 +129,11 @@ if task in ['pRF', 'prf']:
 
     if py_cmd == 'fit_prf':
 
-        if bool(fit_hrf) == True:
-            data_model.fit_hrf = True
-        else:
-            data_model.fit_hrf = False
+        # if we want to fit HRF params
+        data_model.fit_hrf = True if bool(fit_hrf) == True else False
 
-        # get participant models, which also will load 
-        # DM and mask it according to participants behavior
-        pp_prf_models = data_model.set_models(participant_list = data_model.MRIObj.sj_num)
+        # get participant models, which also will load DM
+        pp_prf_models = data_model.set_models(participant_list = data_model.MRIObj.sj_num, filter_predictions = True)
 
         for pp in data_model.MRIObj.sj_num:
 
@@ -138,7 +141,7 @@ if task in ['pRF', 'prf']:
                                 fit_type = run_type, 
                                 chunk_num = chunk_num, vertex = vertex, ROI = ROI,
                                 model2fit = model2fit, outdir = None, save_estimates = True,
-                                xtol = 1e-3, ftol = 1e-4, n_jobs = 8)
+                                xtol = 1e-3, ftol = 1e-4, n_jobs = n_jobs)
 
 elif task == 'soma':
 
@@ -173,7 +176,7 @@ elif task == 'soma':
             ## loop over all subjects 
             for pp in Visuomotor_data.sj_num:
                 data_RFmodel.fit_data(pp, somaModelObj = data_model, betas_model = 'glm',
-                                        fit_type = 'mean_run', nr_grid = 100, n_jobs = 16,
+                                        fit_type = 'mean_run', nr_grid = 100, n_jobs = n_jobs,
                                         region_keys = ['face', 'right_hand', 'left_hand'],
                                         custom_dm = custom_dm)
 

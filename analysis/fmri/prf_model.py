@@ -72,8 +72,9 @@ class prfModel:
         self.total_chunks = self.MRIObj.params['fitting']['prf']['total_chunks']
 
         # bar width ratio
-        self.bar_width_ratio = 0.125
-        self.hrf_onset = 0
+        self.bar_width_ratio = self.MRIObj.params['prf']['bar_width_ratio']
+        self.hrf_onset = self.MRIObj.params['fitting']['prf']['hrf_onset']
+
 
     def get_prf_file_list(self, participant, file_ext = 'cropped_dc_psc.func.gii'):
 
@@ -253,7 +254,7 @@ class prfModel:
         return new_visual_dm
 
 
-    def set_models(self, participant_list = []):
+    def set_models(self, participant_list = [], filter_predictions = True):
 
         """
         define pRF models to be used for each participant in participant list
@@ -293,13 +294,13 @@ class prfModel:
             ## define models ##
             # GAUSS
             gauss_model = Iso2DGaussianModel(stimulus = prf_stim,
-                                                filter_predictions = True,
+                                                filter_predictions = filter_predictions,
                                                 filter_type = self.MRIObj.params['processing']['filter']['prf'],
                                                 filter_params = {'highpass': True,
                                                                 'add_mean': True,
                                                                 'first_modes_to_remove': self.MRIObj.params['processing']['first_modes_to_remove'],
-                                                                'window_length': 201,
-                                                                'polyorder': 3},
+                                                                'window_length': self.MRIObj.params['processing']['sg_filt_window_length'],
+                                                                'polyorder': self.MRIObj.params['processing']['sg_filt_polyorder']},
                                                 hrf_onset = self.hrf_onset,
                                             )
 
@@ -307,13 +308,13 @@ class prfModel:
 
             # CSS
             css_model = CSS_Iso2DGaussianModel(stimulus = prf_stim,
-                                                filter_predictions = True,
+                                                filter_predictions = filter_predictions,
                                                 filter_type = self.MRIObj.params['processing']['filter']['prf'],
                                                 filter_params = {'highpass': True,
                                                                 'add_mean': True,
                                                                 'first_modes_to_remove': self.MRIObj.params['processing']['first_modes_to_remove'],
-                                                                'window_length': 201,
-                                                                'polyorder': 3},
+                                                                'window_length': self.MRIObj.params['processing']['sg_filt_window_length'],
+                                                                'polyorder': self.MRIObj.params['processing']['sg_filt_polyorder']},
                                                 hrf_onset = self.hrf_onset,
                                             )
 
@@ -321,13 +322,13 @@ class prfModel:
 
             # DN 
             dn_model =  Norm_Iso2DGaussianModel(stimulus = prf_stim,
-                                                filter_predictions = True,
+                                                filter_predictions = filter_predictions,
                                                 filter_type = self.MRIObj.params['processing']['filter']['prf'],
                                                 filter_params = {'highpass': True,
                                                                 'add_mean': True,
                                                                 'first_modes_to_remove': self.MRIObj.params['processing']['first_modes_to_remove'],
-                                                                'window_length': 201,
-                                                                'polyorder': 3},
+                                                                'window_length': self.MRIObj.params['processing']['sg_filt_window_length'],
+                                                                'polyorder': self.MRIObj.params['processing']['sg_filt_polyorder']},
                                                 hrf_onset = self.hrf_onset,
                                             )
 
@@ -335,13 +336,13 @@ class prfModel:
 
             # DOG
             dog_model = DoG_Iso2DGaussianModel(stimulus = prf_stim,
-                                                filter_predictions = True,
+                                                filter_predictions = filter_predictions,
                                                 filter_type = self.MRIObj.params['processing']['filter']['prf'],
                                                 filter_params = {'highpass': True,
                                                                 'add_mean': True,
                                                                 'first_modes_to_remove': self.MRIObj.params['processing']['first_modes_to_remove'],
-                                                                'window_length': 201,
-                                                                'polyorder': 3},
+                                                                'window_length': self.MRIObj.params['processing']['sg_filt_window_length'],
+                                                                'polyorder': self.MRIObj.params['processing']['sg_filt_polyorder']},
                                                 hrf_onset = self.hrf_onset,
                                             )
 
