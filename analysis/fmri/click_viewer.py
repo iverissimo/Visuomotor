@@ -225,9 +225,9 @@ class visualize_on_click:
 
                 self.face_betas_ax = self.full_fig.add_subplot(gs[3, 3])
                 self.face_betas_ax.set_title('face')
-                self.RH_betas_ax = self.full_fig.add_subplot(gs[3, 4])
+                self.RH_betas_ax = self.full_fig.add_subplot(gs[3, 4], sharey = self.face_betas_ax)
                 self.RH_betas_ax.set_title('RH')
-                self.LH_betas_ax = self.full_fig.add_subplot(gs[3, 5])
+                self.LH_betas_ax = self.full_fig.add_subplot(gs[3, 5], sharey = self.face_betas_ax)
                 self.LH_betas_ax.set_title('LH')
 
 
