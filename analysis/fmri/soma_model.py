@@ -2104,6 +2104,15 @@ class somaRF_Model(somaModel):
         np.save(op.join(out_dir, 'betas_glm.npy'), betas)
         design_matrix.to_csv(op.join(out_dir, 'DM.csv'), index=False)
 
+    
+    def return_prediction(self, mu = None, size = None, slope = None, nr_points = 4):
+
+        """
+        Helper function to return prediction
+        """
+
+        return self.gauss1D_cart(np.arange(nr_points), mu = mu, sigma = size) * slope
+
 
         
 

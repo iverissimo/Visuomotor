@@ -13,7 +13,7 @@ from nilearn.glm.first_level import make_first_level_design_matrix
 
 class visualize_on_click:
 
-    def __init__(self, MRIObj, pRFModelObj = None, SomaModelObj = None,
+    def __init__(self, MRIObj, pRFModelObj = None, SomaModelObj = None, SomaRF_ModelObj = None,
                         pRF_data = [], soma_data = [],
                         prf_dm = [], max_ecc_ext = 5.5,
                         pysub = 'fsaverage', flatmap_height = 2048, full_figsize = (12, 8)):
@@ -36,6 +36,7 @@ class visualize_on_click:
         # Load pRF and model object
         self.pRFModelObj = pRFModelObj
         self.SomaModelObj = SomaModelObj
+        self.SomaRF_ModelObj = SomaRF_ModelObj
 
         ## data to be plotted 
         self.pRF_data = pRF_data
@@ -106,7 +107,7 @@ class visualize_on_click:
 
         if self.SomaModelObj is not None:
 
-            if somamodel_name == 'glm': # load estimates from standard GLM fitting
+            if somamodel_name in ['glm', 'somaRF']: # load estimates from standard GLM fitting
                 
                 # load GLM estimates, and get betas and prediction
                 soma_estimates = np.load(op.join(self.SomaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
@@ -138,8 +139,32 @@ class visualize_on_click:
                                                                 )
 
                 self.soma_regressors = design_matrix.columns
-            
 
+                if somamodel_name == 'somaRF':
+
+                    ## dir where RF estimates are saved
+                    RF_dir = op.join(self.SomaRF_ModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 'glm', 'mean_run')
+
+                    # load and save in dict for easy access
+                    self.RF_estimates = {'face': np.load(op.join(RF_dir, 'RF_grid_estimates_region-face.npy'), 
+                                                            allow_pickle=True).item(),
+                                        'LH': np.load(op.join(RF_dir, 'RF_grid_estimates_region-left_hand.npy'), 
+                                                            allow_pickle=True).item(),
+                                        'RH': np.load(op.join(RF_dir, 'RF_grid_estimates_region-right_hand.npy'), 
+                                                            allow_pickle=True).item()
+                                                            }
+                    # set region regressor names and indices, for easy access
+                    self.RF_reg_names = {'face': self.SomaRF_ModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['face'],
+                                        'LH': self.SomaRF_ModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['left_hand'],
+                                        'RH': self.SomaRF_ModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['right_hand']}
+
+                    self.RF_reg_inds = {'face': [ind for ind, name in enumerate(self.soma_regressors) if name in self.RF_reg_names['face']],
+                                        'LH': [ind for ind, name in enumerate(self.soma_regressors) if name in self.RF_reg_names['LH']],
+                                        'RH': [ind for ind, name in enumerate(self.soma_regressors) if name in self.RF_reg_names['RH']]
+                                        }
+
+                                        
+            
         ## set figure grid 
         self.full_fig = plt.figure(constrained_layout = True, figsize = self.full_figsize)
 
@@ -174,18 +199,36 @@ class visualize_on_click:
             self.prf_ax.set_title('prf')
 
         elif task2viz == 'soma':
+            
+            if self.somamodel_name == 'glm':
+                gs = self.full_fig.add_gridspec(4, 2)
 
-            gs = self.full_fig.add_gridspec(4, 2)
+                self.flatmap_ax = self.full_fig.add_subplot(gs[:3, :])
 
-            self.flatmap_ax = self.full_fig.add_subplot(gs[:3, :])
+                self.soma_timecourse_ax = self.full_fig.add_subplot(gs[3, :1])
 
-            self.soma_timecourse_ax = self.full_fig.add_subplot(gs[3, :1])
+                self.betas_ax = self.full_fig.add_subplot(gs[3, 1])
 
-            self.betas_ax = self.full_fig.add_subplot(gs[3, 1])
+                self.flatmap_ax.set_title('flatmap')
+                self.soma_timecourse_ax.set_title('Soma timecourse')
+                self.betas_ax.set_title('betas')
+            
+            elif self.somamodel_name == 'somaRF':
 
-            self.flatmap_ax.set_title('flatmap')
-            self.soma_timecourse_ax.set_title('Soma timecourse')
-            self.betas_ax.set_title('betas')
+                gs = self.full_fig.add_gridspec(4, 6)
+
+                self.flatmap_ax = self.full_fig.add_subplot(gs[:3, :])
+                self.flatmap_ax.set_title('flatmap')
+
+                self.soma_timecourse_ax = self.full_fig.add_subplot(gs[3, :3])
+                self.soma_timecourse_ax.set_title('Soma timecourse')
+
+                self.face_betas_ax = self.full_fig.add_subplot(gs[3, 3])
+                self.face_betas_ax.set_title('face')
+                self.RH_betas_ax = self.full_fig.add_subplot(gs[3, 4])
+                self.RH_betas_ax.set_title('RH')
+                self.LH_betas_ax = self.full_fig.add_subplot(gs[3, 5])
+                self.LH_betas_ax.set_title('LH')
 
 
     def get_vertex_prf_model_tc(self, vertex):
@@ -333,10 +376,53 @@ class visualize_on_click:
             elif self.soma_data:
                 self.soma_timecourse_ax = self.plot_soma_tc(self.soma_timecourse_ax, timecourse = self.soma_data[vertex], plot_model = False) 
 
-            self.betas_ax.clear()
-            self.betas_ax.bar(np.arange(self.soma_betas.shape[-1]), self.soma_betas[vertex])
-            self.betas_ax.set_xticks(np.arange(self.soma_betas.shape[-1]))
-            self.betas_ax.set_xticklabels(self.soma_regressors, rotation=80)
+            if self.somamodel_name == 'glm':
+                self.betas_ax.clear()
+                self.betas_ax.bar(np.arange(self.soma_betas.shape[-1]), self.soma_betas[vertex])
+                self.betas_ax.set_xticks(np.arange(self.soma_betas.shape[-1]))
+                self.betas_ax.set_xticklabels(self.soma_regressors, rotation=80)
+            
+            elif self.somamodel_name == 'somaRF':
+                self.face_betas_ax.clear()
+                self.RH_betas_ax.clear()
+                self.LH_betas_ax.clear()
+
+                # plot betas for each region
+                # face
+                self.face_betas_ax.bar(np.arange(len(self.RF_reg_inds['face'])), self.soma_betas[vertex][self.RF_reg_inds['face']])
+                self.face_betas_ax.set_xticks(np.arange(len(self.RF_reg_inds['face'])))
+                self.face_betas_ax.set_xticklabels(self.RF_reg_names['face'], rotation=80)
+                self.face_betas_ax.set_title('face')
+                # add predicted tc
+                self.face_betas_ax.plot(self.SomaRF_ModelObj.return_prediction(mu = self.RF_estimates['face']['mu'][vertex], 
+                                                                            size = self.RF_estimates['face']['size'][vertex], 
+                                                                            slope = self.RF_estimates['face']['slope'][vertex], 
+                                                                            nr_points = len(self.RF_reg_inds['face'])),
+                                        c = 'red',lw=3)
+
+                # RH
+                self.RH_betas_ax.bar(np.arange(len(self.RF_reg_inds['RH'])), self.soma_betas[vertex][self.RF_reg_inds['RH']])
+                self.RH_betas_ax.set_xticks(np.arange(len(self.RF_reg_inds['RH'])))
+                self.RH_betas_ax.set_xticklabels(self.RF_reg_names['RH'], rotation=80)
+                self.RH_betas_ax.set_title('RH')
+                # add predicted tc
+                self.RH_betas_ax.plot(self.SomaRF_ModelObj.return_prediction(mu = self.RF_estimates['RH']['mu'][vertex], 
+                                                                            size = self.RF_estimates['RH']['size'][vertex], 
+                                                                            slope = self.RF_estimates['RH']['slope'][vertex], 
+                                                                            nr_points = len(self.RF_reg_inds['RH'])),
+                                        c = 'red',lw=3)
+
+                # LH
+                self.LH_betas_ax.bar(np.arange(len(self.RF_reg_inds['LH'])), self.soma_betas[vertex][self.RF_reg_inds['LH']])
+                self.LH_betas_ax.set_xticks(np.arange(len(self.RF_reg_inds['LH'])))
+                self.LH_betas_ax.set_xticklabels(self.RF_reg_names['LH'], rotation=80)
+                self.LH_betas_ax.set_title('LH')
+                # add predicted tc
+                self.LH_betas_ax.plot(self.SomaRF_ModelObj.return_prediction(mu = self.RF_estimates['LH']['mu'][vertex], 
+                                                                            size = self.RF_estimates['LH']['size'][vertex], 
+                                                                            slope = self.RF_estimates['LH']['slope'][vertex], 
+                                                                            nr_points = len(self.RF_reg_inds['LH'])),
+                                        c = 'red',lw=3)
 
 
     def onclick(self, event):
@@ -410,5 +496,19 @@ class visualize_on_click:
                 cortex.quickshow(self.images['LH'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
                             fig = self.flatmap_ax, with_colorbar = False)
                 self.flatmap_ax.set_title('Soma Left Hand')
+
+            if self.somamodel_name == 'somaRF':
+                if event.key == '5':
+                    cortex.quickshow(self.images['face_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                    self.flatmap_ax.set_title('Soma face size')
+                elif event.key == '6':
+                    cortex.quickshow(self.images['RH_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                    self.flatmap_ax.set_title('Soma RH size')
+                elif event.key == '7':
+                    cortex.quickshow(self.images['LH_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                    self.flatmap_ax.set_title('Soma LH size')
 
         plt.draw()

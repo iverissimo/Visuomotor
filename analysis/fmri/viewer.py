@@ -49,7 +49,7 @@ class somaViewer:
         self.pysub = pysub
 
     
-    def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm'):
+    def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None):
 
         """
         quick function to open click viewer, need to re furbish later
@@ -75,21 +75,24 @@ class somaViewer:
         ## Load click viewer plotted object
         click_plotter = click_viewer.visualize_on_click(self.somaModelObj.MRIObj, 
                                                         SomaModelObj = self.somaModelObj,
+                                                        SomaRF_ModelObj = data_RFmodel,
                                                         soma_data = data2fit,
                                                         pysub = self.pysub)
 
         ## set figure, and also load estimates and models
-        click_plotter.set_figure(participant, custom_dm = custom_dm)
+        click_plotter.set_figure(participant, custom_dm = custom_dm, 
+                                            task2viz = 'soma', soma_run_type = 'mean_run',
+                                            somamodel_name = model2plot)
+
+        # normalize the distribution, for better visualization
+        region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
+        
+        ## COM map dir
+        com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                'sub-{sj}'.format(sj = participant))
 
         # if model is GLM, load COM maps 
         if model2plot == 'glm':
-
-            # normalize the distribution, for better visualization
-            region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
-            
-            ## COM map dir
-            com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
-                                                    'sub-{sj}'.format(sj = participant))
 
             ########## load face plots ##########
             
@@ -132,6 +135,89 @@ class somaViewer:
                                                         vmin=0, vmax=4,
                                                         vmin2 = 0, vmax2 = 1,
                                                         cmap = col2D_name)
+
+        elif model2plot == 'somaRF':
+            
+            ########## load face plots ##########
+
+            face_mask = np.load(op.join(com_betas_dir, 'zmask_reg-face.npy'), allow_pickle=True)
+            face_center = np.array(click_plotter.RF_estimates['face']['mu'])#.copy()
+            face_center[np.isnan(face_mask)] = np.nan
+
+            # create costume colormp J4
+            n_bins = 256
+            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
+                                                                bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
+
+            click_plotter.images['face'] = cortex.Vertex2D(face_center, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=3,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = col2D_name)
+
+            # face size plots
+            face_size = np.array(click_plotter.RF_estimates['face']['size'])#.copy()
+            face_size[np.isnan(face_mask)] = np.nan
+
+            click_plotter.images['face_size'] = cortex.Vertex2D(face_size, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=3,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = 'hot_alpha')
+
+            ########## load right hand plots ##########
+
+            RH_mask = np.load(op.join(com_betas_dir, 'zmask_reg-upper_limb_R.npy'), allow_pickle=True)
+            RH_center = np.array(click_plotter.RF_estimates['RH']['mu'])#.copy()
+            RH_center[np.isnan(RH_mask)] = np.nan
+
+            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
+                                                                    bins = n_bins, 
+                                                                    cmap_name = 'rainbow_r'))[-1])[0]
+
+            click_plotter.images['RH'] = cortex.Vertex2D(RH_center, 
+                                                        region_mask_alpha,
+                                                        subject = self.pysub,
+                                                        vmin=0, vmax=4,
+                                                        vmin2 = 0, vmax2 = 1,
+                                                        cmap = col2D_name)
+
+            # RH size plots
+            RH_size = np.array(click_plotter.RF_estimates['RH']['size'])#.copy()
+            RH_size[np.isnan(RH_mask)] = np.nan
+
+            click_plotter.images['RH_size'] = cortex.Vertex2D(RH_size, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=4,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = 'hot_alpha')
+
+            ########## load left hand plots ##########
+
+            LH_mask = np.load(op.join(com_betas_dir, 'zmask_reg-upper_limb_L.npy'), allow_pickle=True)
+            LH_center = np.array(click_plotter.RF_estimates['LH']['mu'])#.copy()
+            LH_center[np.isnan(LH_mask)] = np.nan
+
+            click_plotter.images['LH'] = cortex.Vertex2D(LH_center, 
+                                                        region_mask_alpha,
+                                                        subject = self.pysub,
+                                                        vmin=0, vmax=4,
+                                                        vmin2 = 0, vmax2 = 1,
+                                                        cmap = col2D_name)
+
+            # LH size plots
+            LH_size = np.array(click_plotter.RF_estimates['LH']['size'])#.copy()
+            LH_size[np.isnan(LH_mask)] = np.nan
+
+            click_plotter.images['LH_size'] = cortex.Vertex2D(LH_size, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=4,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = 'hot_alpha')
 
 
         ## soma rsq

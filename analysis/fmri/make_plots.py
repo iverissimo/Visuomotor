@@ -10,7 +10,7 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
     params = yaml.safe_load(f_in)
 
 from preproc_mridata import MRIData
-from soma_model import GLMsingle_Model, GLM_Model
+from soma_model import GLMsingle_Model, GLM_Model, somaRF_Model
 from prf_model import prfModel
 
 from viewer import somaViewer, pRFViewer
@@ -97,11 +97,21 @@ if task in ['pRF', 'prf']:
 
 elif task == 'soma':
 
-    if model_name == 'glm':
+    # if standard GLM model or RF model that uses GLM betas
+    if (model_name == 'glm') or \
+        ((model_name == 'somaRF') and (Visuomotor_data.params['fitting']['soma']['somaRF']['beta_model'] == 'glm')):
+
+        # load data model
         data_model = GLM_Model(Visuomotor_data)
 
         # if we want nilearn dm or custom 
         custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+
+        if model_name == 'somaRF':
+            ## make RF model object
+            data_RFmodel = somaRF_Model(Visuomotor_data)
+        else:
+            data_RFmodel = None
 
     elif model_name == 'glmsingle':
         data_model = GLMsingle_Model(Visuomotor_data)
@@ -135,7 +145,7 @@ elif task == 'soma':
 
     elif py_cmd == 'show_click':
 
-        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name)
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name, data_RFmodel = data_RFmodel)
 
 
 
