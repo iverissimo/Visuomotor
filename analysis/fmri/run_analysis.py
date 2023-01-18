@@ -101,9 +101,9 @@ n_jobs = args.n_jobs
 # task and model to analyze
 task = args.task
 model2fit = args.model2fit
+run_type = args.run_type
 
 ## prf options
-run_type = args.run_type
 fit_hrf = args.fit_hrf
 chunk_num = args.chunk_num
 vertex = args.vertex
@@ -159,7 +159,8 @@ elif task == 'soma':
             
             ## loop over all subjects 
             for pp in Visuomotor_data.sj_num:
-                data_model.fit_data(pp, fit_type = 'mean_run', custom_dm = custom_dm)
+                data_model.fit_data(pp, fit_type = run_type, custom_dm = custom_dm, 
+                                        keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
         elif py_cmd == 'stats_glm':
 

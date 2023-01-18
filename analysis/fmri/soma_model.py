@@ -547,7 +547,7 @@ class somaModel:
 
         return convolved_tc
 
-    def resample_arr(self, upsample_data, osf = 10, final_sf = 1.6):
+    def resample_arr(self, upsample_data, osf = 10, final_sf = 1.6, anti_aliasing = True):
 
         """ resample array
         using cubic interpolation
@@ -563,17 +563,21 @@ class somaModel:
             
         """
         
-        # original scale of data in seconds
-        original_scale = np.arange(0, upsample_data.shape[-1]/osf, 1/osf)
+        if anti_aliasing:
+            out_arr = scipy.signal.decimate(upsample_data, int(osf * final_sf), ftype = 'fir')
 
-        # cubic interpolation of predictor
-        interp = scipy.interpolate.interp1d(original_scale, 
-                                    upsample_data, 
-                                    kind = "linear", axis=-1) #"cubic", axis=-1)
-        
-        desired_scale = np.arange(0, upsample_data.shape[-1]/osf, final_sf) # we want the predictor to be sampled in TR
+        else:
+            # original scale of data in seconds
+            original_scale = np.arange(0, upsample_data.shape[-1]/osf, 1/osf)
 
-        out_arr = interp(desired_scale)
+            # cubic interpolation of predictor
+            interp = scipy.interpolate.interp1d(original_scale, 
+                                        upsample_data, 
+                                        kind = "linear", axis=-1) #"cubic", axis=-1)
+            
+            desired_scale = np.arange(0, upsample_data.shape[-1]/osf, final_sf) # we want the predictor to be sampled in TR
+
+            out_arr = interp(desired_scale)
         
         return out_arr
 
@@ -640,7 +644,6 @@ class GLM_Model(somaModel):
 
             # and resample back to TR 
             reg_resampled = self.resample_arr(reg_pred_osf_conv[0], osf = osf, final_sf = TR)/(osf) # dividing by osf so amplitude scaling not massive (but irrelevante because a.u.)
-            #reg_resampled/=reg_resampled.max()
             
             all_regs_dict[reg_name] = reg_resampled
             
@@ -828,7 +831,8 @@ class GLM_Model(somaModel):
                 
                 np.save(LR_stats_filename, LR_stats_dict)
     
-    def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', custom_dm = True):
+    def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', 
+                                    custom_dm = True, keep_b_evs = False):
 
         """ fit glm model to participant data (averaged over runs)
         
@@ -863,7 +867,7 @@ class GLM_Model(somaModel):
             # get all run lists
             run_loo_list = self.get_run_list(gii_filenames)
 
-            # leave one run out, load other and average
+            # leave one run out, load others and average
             data2fit = []
 
             for lo_run_key in run_loo_list:
@@ -875,14 +879,15 @@ class GLM_Model(somaModel):
             data2fit = np.vstack(data2fit)
 
         # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant)
+        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
 
         if custom_dm: # if we want to make the dm 
 
             design_matrix = self.make_custom_dm(events_avg, 
                                                 osf = 100, data_len_TR = data2fit.shape[-1], 
                                                 TR = self.MRIObj.TR, 
-                                                hrf_params = [1,1,0], hrf_onset = 0)
+                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
             hrf_model = 'custom'
 
         else: # if we want to use nilearn function
@@ -923,7 +928,7 @@ class GLM_Model(somaModel):
             if fit_type == 'loo_run':
 
                 # load left out data
-                other_run_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[rind]).zfill(2)) in file])
+                other_run_data = np.nanmean(self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[rind]).zfill(2)) in file]), axis = 0)
                 
                 estimates_dict['cv_r2'] = np.nan_to_num(1-np.sum((other_run_data - estimates_dict['prediction'])**2, axis=-1)/(other_run_data.shape[-1]*other_run_data.var(-1)))
 
