@@ -242,6 +242,42 @@ class somaModel:
 
         return t_val,p_val,z_score
 
+    def calc_contrast_effect(self, betas = [], contrast = [], return_zscore = True,
+                                sse = None, df = None, design_var = None, pval_1sided = True):
+
+        """Calculates effect size and variance 
+        for a given contrast and beta values
+        
+        Parameters
+        ----------
+        betas : arr
+            array of bata values
+        contrast: arr/list
+            contrast vector       
+        sse: float
+            sum of squared errors between model prediction and data
+        df: int
+            degrees of freedom (timepoints - predictores)   
+        design_var: float
+            design variance 
+        pval_1sided: bool
+            if we want one or two sided p-value
+        """
+
+        # effect size
+        cb = contrast.dot(betas)
+
+        # effect variance
+        effect_var = (sse/df) * design_var
+
+        if return_zscore:
+            z_score = self.calc_contrast_stats(betas = betas, contrast = contrast, 
+                                                sse = sse, df = df, design_var = design_var, pval_1sided = pval_1sided)[-1]
+
+            return cb, effect_var, z_score
+        else:
+            return cb, effect_var
+
     def get_atlas_roi_df(self, annot_pth = None, hemi_labels = {'lh': 'L', 'rh': 'R'}, 
                                 base_str = 'HCP-MMP1.annot', hemi_vert_num = 163842, return_RGBA = False):
 
@@ -883,6 +919,206 @@ class GLM_Model(somaModel):
                     LR_stats_dict['z_score'] = LR_surf_stats[..., 2]
                     
                     np.save(LR_stats_filename, LR_stats_dict)
+
+    
+    def fixed_effects_contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'loo_run',
+                                            z_threshold = 3.1, pval_1sided = True, keep_b_evs = False,
+                                            reg_keys = ['face', 'upper_limb', 'lower_limb']):
+
+        """ Calculate fixed effects across runs to make
+        Make simple contrasts to localize body regions
+        (body, hands, legs) and contralateral regions (R vs L hand)
+
+        Requires GLM fitting to have been done before
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID           
+        """
+
+        ## make new out dir, depeding on our HRF approach
+        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
+                                        'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
+        # get list with gii files
+        gii_filenames = self.get_soma_file_list(participant, 
+                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+
+        if fit_type == 'loo_run':
+            # get all run lists
+            run_loo_list = self.get_run_list(gii_filenames)
+
+            # load left out run
+            data2fit = []
+
+            for lo_run_key in run_loo_list:
+                print('Loading left out run-{r}'.format(r = str(lo_run_key).zfill(2)))
+
+                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) in file])
+                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
+            
+            data2fit = np.vstack(data2fit) # [runs, vertex, TR]
+
+        elif fit_type == 'all_run':
+            raise ValueError('Would load and make fix effects for each individual run fit. Not implemented yet')
+
+        # make average event file for pp, based on events file
+        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
+        
+        # make DM
+        if custom_dm: # if we want to make the dm 
+
+            design_matrix = self.make_custom_dm(events_avg, 
+                                                osf = 100, data_len_TR = data2fit.shape[-1], 
+                                                TR = self.MRIObj.TR, 
+                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
+            hrf_model = 'custom'
+
+        else: # if we want to use nilearn function
+
+            # specifying the timing of fMRI frames
+            frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
+
+            # Create the design matrix, hrf model containing Glover model 
+            design_matrix = make_first_level_design_matrix(frame_times,
+                                                        events = events_avg,
+                                                        hrf_model = hrf_model
+                                                        )
+
+        ## calculate contrast effects for all runs
+        all_runs_effects = {'face': {'effect_size': [], 'effect_variance': []},
+                            'upper_limb': {'effect_size': [], 'effect_variance': []},
+                            'upper_limb_RvsL': {'effect_size': [], 'effect_variance': []},
+                            'lower_limb': {'effect_size': [], 'effect_variance': []},
+                            'lower_limb_RvsL': {'effect_size': [], 'effect_variance': []}} # to append all and calculate fix effects in the end
+
+        for rind, avg_data in enumerate(data2fit): # [vertex, TR]
+
+            # if we want stats from leave one out, then we'll do a fixed effects statistic
+            if fit_type == 'loo_run':
+
+                ## load estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                                fit_type, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2))), 
+                                                allow_pickle=True).item()
+
+            betas = soma_estimates['betas']
+            prediction = soma_estimates['prediction']
+
+            # now make simple contrasts
+            print('Computing simple contrasts')
+
+            # get region keys
+            region_regs = self.get_region_keys(reg_keys = reg_keys, keep_b_evs = keep_b_evs)
+            # loo for keys 
+            loo_keys = leave_one_out(reg_keys) 
+        
+            # one broader region vs all the others
+            for index,region in enumerate(reg_keys): 
+
+                print('contrast for %s ' %region)
+
+                # list of other contrasts
+                other_contr = np.append(region_regs[loo_keys[index][0]],
+                                        region_regs[loo_keys[index][1]])
+
+                # main contrast calculated
+                contrast = self.set_contrast(design_matrix.columns, 
+                                        [region_regs[str(region)], other_contr],
+                                    [1,-len(region_regs[str(region)])/len(other_contr)],
+                                    num_cond=2)
+
+                # set filename
+                effect_filename = op.join(out_dir, 'run-{ri}_effect_{reg}_vs_all_contrast.npy'.format(reg = region,
+                                                                                                    ri = str(run_loo_list[rind]).zfill(2)))
+                
+                # compute contrast-related effect size and variance 
+                # for run
+                soma_run_effect = Parallel(n_jobs=16)(delayed(self.calc_contrast_effect)(betas = betas[v], 
+                                                                                contrast = contrast, 
+                                                                                sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
+                                                                                df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
+                                                                                design_var = self.design_variance(design_matrix.values, contrast),
+                                                                                return_zscore = True 
+                                                                                ) for v in np.arange(avg_data.shape[0]))
+
+                soma_run_effect = np.vstack(soma_run_effect) # cb, effect_var
+                soma_run_effect_dict = {}
+                soma_run_effect_dict['effect_size'] = soma_run_effect[..., 0]
+                soma_run_effect_dict['effect_variance'] = soma_run_effect[..., 1]
+
+                np.save(effect_filename, soma_run_effect_dict)
+
+                # append run
+                all_runs_effects[region]['effect_size'].append(soma_run_effect[..., 0][np.newaxis,...])
+                all_runs_effects[region]['effect_variance'].append(soma_run_effect[..., 1][np.newaxis,...])
+
+                ## now do rest of the contrasts within region (if lateralized) ###
+
+                if region != 'face':
+
+                    # compare left and right
+                    print('Right vs Left contrasts')
+
+                    if region == 'upper_limb':
+                        limbs = ['hand', self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb']]
+                    else:
+                        limbs = ['leg', self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb']]
+                                
+                    rtask = [s for s in limbs[-1] if 'r'+limbs[0] in s]
+                    ltask = [s for s in limbs[-1] if 'l'+limbs[0] in s]
+                    tasks = [rtask,ltask] # list with right and left elements
+                                
+                    contrast = self.set_contrast(design_matrix.columns, tasks, [1, -1], num_cond=2)
+
+                    # set filename
+                    LR_effect_filename = op.join(out_dir, 'run-{ri}_effect_{reg}_RvsL_contrast.npy'.format(reg = region,
+                                                                                                        ri = str(run_loo_list[rind]).zfill(2)))
+
+                    # mask data - only significant voxels for region
+                    region_ind = np.where((soma_run_effect[..., 2] >= z_threshold))[0]
+
+                    # compute contrast-related effect size and variance 
+                    # for run
+                    LR_run_effect = Parallel(n_jobs=16)(delayed(self.calc_contrast_effect)(betas = betas[v], 
+                                                                                contrast = contrast, 
+                                                                                sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
+                                                                                df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
+                                                                                design_var = self.design_variance(design_matrix.values, contrast), 
+                                                                                return_zscore = False) for v in tqdm(region_ind))
+                    LR_run_effect = np.vstack(LR_run_effect) # cb, effect_var
+
+                    # fill for whole surface
+                    LR_surf_effect = np.zeros((soma_run_effect[..., 2].shape[0], LR_run_effect.shape[-1]))
+                    LR_surf_effect[:] = np.nan
+                    LR_surf_effect[region_ind,:] = LR_run_effect
+
+                    # save in dict
+                    LR_run_effect_dict = {}
+                    LR_run_effect_dict['effect_size'] = LR_surf_effect[..., 0]
+                    LR_run_effect_dict['effect_variance'] = LR_surf_effect[..., 1]
+                    
+                    np.save(LR_effect_filename, LR_run_effect_dict)
+
+                    # append run
+                    all_runs_effects['{reg}_RvsL'.format(reg = region)]['effect_size'].append(LR_surf_effect[..., 0][np.newaxis,...])
+                    all_runs_effects['{reg}_RvsL'.format(reg = region)]['effect_variance'].append(LR_surf_effect[..., 1][np.newaxis,...])
+
+        ## NOW ACTUALLY CALCULATE FIXED EFFECTS ACROSS RUNS
+        
+        for key_name in all_runs_effects.keys():
+
+            fixed_effects_T = np.nanmean(all_runs_effects[key_name]['effect_size'], 
+                                        axis = 0)/np.sqrt((np.nanmean(all_runs_effects[key_name]['effect_variance'], 
+                                                            axis = 0)/len(all_runs_effects[key_name]['effect_variance']))) 
+
+            # save
+            filename = op.join(out_dir, 'fixed_effects_T_{kn}_contrast.npy'.format(kn = key_name))
+            np.save(filename, fixed_effects_T[0])
 
     
     def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', 

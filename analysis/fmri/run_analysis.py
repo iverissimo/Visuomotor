@@ -170,6 +170,14 @@ elif task == 'soma':
                                                 custom_dm = custom_dm, fit_type = run_type,
                                                 keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
+        elif py_cmd == 'fixed_effects':
+            
+            ## loop over all subjects 
+            for pp in Visuomotor_data.sj_num:
+                data_model.fixed_effects_contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
+                                                            custom_dm = custom_dm, fit_type = run_type,
+                                                            keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
+
         elif py_cmd == 'fit_RF':
 
             ## make RF model object
