@@ -732,22 +732,22 @@ class GLM_Model(somaModel):
         if fit_type == 'mean_run':
             # load and average data of all runs
             all_data = self.load_data4fitting(gii_filenames)
-            avg_data = np.nanmean(all_data, axis = 0) # [vertex, TR]
+            data2fit = np.nanmean(all_data, axis = 0)[np.newaxis,...] # [runs, vertex, TR]
         
         elif fit_type == 'loo_run':
             # get all run lists
             run_loo_list = self.get_run_list(gii_filenames)
 
             # leave one run out, load others and average
-            avg_data = []
+            data2fit = []
 
             for lo_run_key in run_loo_list:
                 print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
 
                 all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file])
-                avg_data.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
+                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
             
-            avg_data = np.vstack(avg_data) # [runs, vertex, TR]
+            data2fit = np.vstack(data2fit) # [runs, vertex, TR]
         
         # make average event file for pp, based on events file
         events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
@@ -756,7 +756,7 @@ class GLM_Model(somaModel):
         if custom_dm: # if we want to make the dm 
 
             design_matrix = self.make_custom_dm(events_avg, 
-                                                osf = 100, data_len_TR = avg_data.shape[-1], 
+                                                osf = 100, data_len_TR = data2fit.shape[-1], 
                                                 TR = self.MRIObj.TR, 
                                                 hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
                                                 hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
@@ -765,7 +765,7 @@ class GLM_Model(somaModel):
         else: # if we want to use nilearn function
 
             # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(avg_data.shape[-1]))
+            frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
 
             # Create the design matrix, hrf model containing Glover model 
             design_matrix = make_first_level_design_matrix(frame_times,
@@ -773,16 +773,26 @@ class GLM_Model(somaModel):
                                                         hrf_model = hrf_model
                                                         )
 
-        # if we want stats from leave one out, then we'll do a fixed effects statistic
-        if fit_type == 'loo_run':
-            print('Will call another function. Not implemented yet')
-        
-        elif fit_type == 'mean_run':
+        ## get stats for all runs
+        for rind, avg_data in enumerate(data2fit): # [vertex, TR]
 
-            ## load estimates, and get betas and prediction
-            soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                            allow_pickle=True).item()
+            # if we want stats from leave one out, then we'll do a fixed effects statistic
+            if fit_type == 'loo_run':
+                ## load estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                                fit_type, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2))), 
+                                                allow_pickle=True).item()
+
+                # update outdir for current run we are running
+                out_dir = op.join(out_dir, 'loo_run-{ri}'.format(ri = str(run_loo_list[rind]).zfill(2)))
+                os.makedirs(out_dir, exist_ok = True)
+
+            elif fit_type == 'mean_run':
+
+                ## load estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
             betas = soma_estimates['betas']
             prediction = soma_estimates['prediction']
 
