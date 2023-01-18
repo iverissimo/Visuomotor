@@ -635,34 +635,40 @@ class somaViewer:
                                         with_colorbar=False,with_curvature=True,with_sulci=True)
 
 
-    def plot_COM_maps(self, participant, region = 'face', n_bins = 256, plot_cuttout = False, custom_dm = True):
+    def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', 
+                                    n_bins = 256, plot_cuttout = False, custom_dm = True, keep_b_evs = False):
 
         """
         plot COM maps from GLM betas
         """
 
         fig_pth = op.join(self.outputdir, 'glm_COM_maps',
-                                            'sub-{sj}'.format(sj = participant))
+                                            'sub-{sj}'.format(sj = participant), fit_type)
         # if output path doesn't exist, create it
         os.makedirs(fig_pth, exist_ok = True)
 
         # load GLM estimates, and get betas and prediction
         soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
                                         'sub-{sj}'.format(sj = participant), 
-                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
+                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                        allow_pickle=True).item()
         r2 = soma_estimates['r2']
 
         # normalize the distribution, for better visualization
         region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
 
         # call COM function
-        self.somaModelObj.make_COM_maps(participant, region = region, custom_dm = custom_dm)
+        self.somaModelObj.make_COM_maps(participant, region = region, fit_type = fit_type,
+                                                    custom_dm = custom_dm, keep_b_evs = keep_b_evs)
+
+        sides_list = ['L', 'R'] if keep_b_evs == False else ['L', 'R', 'B']
 
         ## load COM values and plot
         if region == 'face':
 
             com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
-                                                    'sub-{sj}'.format(sj = participant), 'COM_reg-face.npy')
+                                                    'sub-{sj}'.format(sj = participant), 
+                                                    fit_type, 'COM_reg-face.npy')
 
             COM_region = np.load(com_betas_dir, allow_pickle = True)
             
@@ -717,10 +723,11 @@ class somaViewer:
 
                 
         else:
-            for side in ['L', 'R']:
+            for side in sides_list:
                 
                 com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
-                                                    'sub-{sj}'.format(sj = participant), 'COM_reg-upper_limb_{s}.npy'.format(s=side))
+                                                    'sub-{sj}'.format(sj = participant), fit_type,
+                                                    'COM_reg-upper_limb_{s}.npy'.format(s=side))
 
                 COM_region = np.load(com_betas_dir, allow_pickle = True)
                 

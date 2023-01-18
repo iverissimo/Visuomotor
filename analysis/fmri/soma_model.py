@@ -684,8 +684,29 @@ class GLM_Model(somaModel):
         
         return prediction, betas, r2, mse
 
+
+    def get_region_keys(self, reg_keys = ['face', 'upper_limb', 'lower_limb'], keep_b_evs = False):
+
+        """
+        Helper function to get region key dictionary
+        usefull to make general region contrasts 
+        """
+
+        region_regs = {}
+
+        for reg in reg_keys:
+
+            if (keep_b_evs == False) and (reg != 'face'):
+                region_regs[reg] = [val for val in self.MRIObj.params['fitting']['soma']['all_contrasts'][reg] if 'bhand' not in val and 'bleg' not in val]
+            else:
+                region_regs[reg] = self.MRIObj.params['fitting']['soma']['all_contrasts'][reg]
+            
+        return region_regs
+
+
     def contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'mean_run',
-                                            z_threshold = 3.1, pval_1sided = True):
+                                            z_threshold = 3.1, pval_1sided = True, keep_b_evs = False,
+                                            reg_keys = ['face', 'upper_limb', 'lower_limb']):
 
         """ Make simple contrasts to localize body regions
         (body, hands, legs) and contralateral regions (R vs L hand)
@@ -700,7 +721,7 @@ class GLM_Model(somaModel):
 
         ## make new out dir, depeding on our HRF approach
         out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                        'sub-{sj}'.format(sj = participant))
+                                        'sub-{sj}'.format(sj = participant), fit_type)
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
@@ -708,19 +729,37 @@ class GLM_Model(somaModel):
         gii_filenames = self.get_soma_file_list(participant, 
                                             file_ext = self.MRIObj.params['fitting']['soma']['extension'])
 
-        # load and average data of all runs
-        all_data = self.load_data4fitting(gii_filenames)
-        avg_data = np.nanmean(all_data, axis = 0) # [vertex, TR]
+        if fit_type == 'mean_run':
+            # load and average data of all runs
+            all_data = self.load_data4fitting(gii_filenames)
+            avg_data = np.nanmean(all_data, axis = 0) # [vertex, TR]
+        
+        elif fit_type == 'loo_run':
+            # get all run lists
+            run_loo_list = self.get_run_list(gii_filenames)
 
+            # leave one run out, load others and average
+            avg_data = []
+
+            for lo_run_key in run_loo_list:
+                print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
+
+                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file])
+                avg_data.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
+            
+            avg_data = np.vstack(avg_data) # [runs, vertex, TR]
+        
         # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant)
-
+        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
+        
+        # make DM
         if custom_dm: # if we want to make the dm 
 
             design_matrix = self.make_custom_dm(events_avg, 
                                                 osf = 100, data_len_TR = avg_data.shape[-1], 
                                                 TR = self.MRIObj.TR, 
-                                                hrf_params = [1,1,0], hrf_onset = 0)
+                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
             hrf_model = 'custom'
 
         else: # if we want to use nilearn function
@@ -734,102 +773,107 @@ class GLM_Model(somaModel):
                                                         hrf_model = hrf_model
                                                         )
 
-        ## load estimates, and get betas and prediction
-        soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                        allow_pickle=True).item()
-        betas = soma_estimates['betas']
-        prediction = soma_estimates['prediction']
+        # if we want stats from leave one out, then we'll do a fixed effects statistic
+        if fit_type == 'loo_run':
+            print('Will call another function. Not implemented yet')
+        
+        elif fit_type == 'mean_run':
 
-        # now make simple contrasts
-        print('Computing simple contrasts')
-        print('Using z-score of %0.2f as threshold for localizer' %z_threshold)
+            ## load estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()
+            betas = soma_estimates['betas']
+            prediction = soma_estimates['prediction']
 
-        reg_keys = ['face', 'upper_limb', 'lower_limb']
-        region_regs = {'face': self.MRIObj.params['fitting']['soma']['all_contrasts']['face'],
-                       'upper_limb': [val for val in self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb'] if 'bhand' not in val],
-                       'lower_limb': [val for val in self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb'] if 'bleg' not in val]}
-
-        loo_keys = leave_one_out(reg_keys) # loo for keys 
-
-        # one broader region vs all the others
-        for index,region in enumerate(reg_keys): 
-
-            print('contrast for %s ' %region)
-
-            # list of other contrasts
-            other_contr = np.append(region_regs[loo_keys[index][0]],
-                                    region_regs[loo_keys[index][1]])
-
-            # main contrast calculated
-            contrast = self.set_contrast(design_matrix.columns, 
-                                    [region_regs[str(region)], other_contr],
-                                [1,-len(region_regs[str(region)])/len(other_contr)],
-                                num_cond=2)
-
-            # set filename
-            stats_filename = op.join(out_dir, 'stats_{reg}_vs_all_contrast.npy'.format(reg = region))
+            # now make simple contrasts
+            print('Computing simple contrasts')
+            print('Using z-score of %0.2f as threshold for localizer' %z_threshold)
             
-            # compute contrast-related statistics
-            soma_stats = Parallel(n_jobs=16)(delayed(self.calc_contrast_stats)(betas = betas[v], 
-                                                                            contrast = contrast, 
-                                                                            sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
-                                                                            df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
-                                                                            design_var = self.design_variance(design_matrix.values, contrast), 
-                                                                            pval_1sided = pval_1sided) for v in np.arange(avg_data.shape[0]))
-            soma_stats = np.vstack(soma_stats) # t_val,p_val,zscore
-            soma_stats_dict = {}
-            soma_stats_dict['t_val'] = soma_stats[..., 0]
-            soma_stats_dict['p_val'] = soma_stats[..., 1]
-            soma_stats_dict['z_score'] = soma_stats[..., 2]
-            
-            np.save(stats_filename, soma_stats_dict)
+            # get region keys
+            region_regs = self.get_region_keys(reg_keys = reg_keys, keep_b_evs = keep_b_evs)
+            # loo for keys 
+            loo_keys = leave_one_out(reg_keys) 
 
-            ## now do rest of the contrasts within region (if lateralized) ###
+            # one broader region vs all the others
+            for index,region in enumerate(reg_keys): 
 
-            if region != 'face':
+                print('contrast for %s ' %region)
 
-                # compare left and right
-                print('Right vs Left contrasts')
+                # list of other contrasts
+                other_contr = np.append(region_regs[loo_keys[index][0]],
+                                        region_regs[loo_keys[index][1]])
 
-                if region == 'upper_limb':
-                    limbs = ['hand', self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb']]
-                else:
-                    limbs = ['leg', self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb']]
-                            
-                rtask = [s for s in limbs[-1] if 'r'+limbs[0] in s]
-                ltask = [s for s in limbs[-1] if 'l'+limbs[0] in s]
-                tasks = [rtask,ltask] # list with right and left elements
-                            
-                contrast = self.set_contrast(design_matrix.columns, tasks, [1, -1], num_cond=2)
+                # main contrast calculated
+                contrast = self.set_contrast(design_matrix.columns, 
+                                        [region_regs[str(region)], other_contr],
+                                    [1,-len(region_regs[str(region)])/len(other_contr)],
+                                    num_cond=2)
 
                 # set filename
-                LR_stats_filename = op.join(out_dir, 'stats_{reg}_RvsL_contrast.npy'.format(reg = region))
-
-                # mask data - only significant voxels for region
-                region_ind = np.where((soma_stats_dict['z_score'] >= z_threshold))[0]
-
-                # compute contrast-related statistics
-                LR_stats = Parallel(n_jobs=16)(delayed(self.calc_contrast_stats)(betas = betas[v], 
-                                                                            contrast = contrast, 
-                                                                            sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
-                                                                            df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
-                                                                            design_var = self.design_variance(design_matrix.values, contrast), 
-                                                                            pval_1sided = pval_1sided) for v in tqdm(region_ind))
-                LR_stats = np.vstack(LR_stats) # t_val, p_val, zscore
-
-                # fill for whole surface
-                LR_surf_stats = np.zeros((soma_stats_dict['z_score'].shape[0], LR_stats.shape[-1]))
-                LR_surf_stats[:] = np.nan
-                LR_surf_stats[region_ind,:] = LR_stats
-
-                # save in dict
-                LR_stats_dict = {}
-                LR_stats_dict['t_val'] = LR_surf_stats[..., 0]
-                LR_stats_dict['p_val'] = LR_surf_stats[..., 1]
-                LR_stats_dict['z_score'] = LR_surf_stats[..., 2]
+                stats_filename = op.join(out_dir, 'stats_{reg}_vs_all_contrast.npy'.format(reg = region))
                 
-                np.save(LR_stats_filename, LR_stats_dict)
+                # compute contrast-related statistics
+                soma_stats = Parallel(n_jobs=16)(delayed(self.calc_contrast_stats)(betas = betas[v], 
+                                                                                contrast = contrast, 
+                                                                                sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
+                                                                                df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
+                                                                                design_var = self.design_variance(design_matrix.values, contrast), 
+                                                                                pval_1sided = pval_1sided) for v in np.arange(avg_data.shape[0]))
+                soma_stats = np.vstack(soma_stats) # t_val,p_val,zscore
+                soma_stats_dict = {}
+                soma_stats_dict['t_val'] = soma_stats[..., 0]
+                soma_stats_dict['p_val'] = soma_stats[..., 1]
+                soma_stats_dict['z_score'] = soma_stats[..., 2]
+                
+                np.save(stats_filename, soma_stats_dict)
+
+                ## now do rest of the contrasts within region (if lateralized) ###
+
+                if region != 'face':
+
+                    # compare left and right
+                    print('Right vs Left contrasts')
+
+                    if region == 'upper_limb':
+                        limbs = ['hand', self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb']]
+                    else:
+                        limbs = ['leg', self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb']]
+                                
+                    rtask = [s for s in limbs[-1] if 'r'+limbs[0] in s]
+                    ltask = [s for s in limbs[-1] if 'l'+limbs[0] in s]
+                    tasks = [rtask,ltask] # list with right and left elements
+                                
+                    contrast = self.set_contrast(design_matrix.columns, tasks, [1, -1], num_cond=2)
+
+                    # set filename
+                    LR_stats_filename = op.join(out_dir, 'stats_{reg}_RvsL_contrast.npy'.format(reg = region))
+
+                    # mask data - only significant voxels for region
+                    region_ind = np.where((soma_stats_dict['z_score'] >= z_threshold))[0]
+
+                    # compute contrast-related statistics
+                    LR_stats = Parallel(n_jobs=16)(delayed(self.calc_contrast_stats)(betas = betas[v], 
+                                                                                contrast = contrast, 
+                                                                                sse = ((avg_data[v] - prediction[v]) ** 2).sum() , 
+                                                                                df = (design_matrix.values.shape[0] - design_matrix.values.shape[1]), 
+                                                                                design_var = self.design_variance(design_matrix.values, contrast), 
+                                                                                pval_1sided = pval_1sided) for v in tqdm(region_ind))
+                    LR_stats = np.vstack(LR_stats) # t_val, p_val, zscore
+
+                    # fill for whole surface
+                    LR_surf_stats = np.zeros((soma_stats_dict['z_score'].shape[0], LR_stats.shape[-1]))
+                    LR_surf_stats[:] = np.nan
+                    LR_surf_stats[region_ind,:] = LR_stats
+
+                    # save in dict
+                    LR_stats_dict = {}
+                    LR_stats_dict['t_val'] = LR_surf_stats[..., 0]
+                    LR_stats_dict['p_val'] = LR_surf_stats[..., 1]
+                    LR_stats_dict['z_score'] = LR_surf_stats[..., 2]
+                    
+                    np.save(LR_stats_filename, LR_stats_dict)
+
     
     def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', 
                                     custom_dm = True, keep_b_evs = False):
@@ -943,7 +987,7 @@ class GLM_Model(somaModel):
                         dur  = end_time - start_time))
         
     def make_COM_maps(self, participant, region = 'face', custom_dm = True,
-                        hrf_model = 'glover', z_threshold = 3.1, fit_type = 'mean_run'):
+                        hrf_model = 'glover', z_threshold = 3.1, fit_type = 'mean_run', keep_b_evs = False):
 
         """ Make COM maps for a specific region
         given betas from GLM fit
@@ -956,13 +1000,13 @@ class GLM_Model(somaModel):
 
         ## make new out dir, depeding on our HRF approach
         out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
-                                        'sub-{sj}'.format(sj = participant))
+                                        'sub-{sj}'.format(sj = participant), fit_type)
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
         # path where Region contrasts were stored
         stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                                'sub-{sj}'.format(sj = participant))
+                                                'sub-{sj}'.format(sj = participant), fit_type)
 
         # load GLM estimates, and get betas and prediction
         soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
@@ -991,15 +1035,23 @@ class GLM_Model(somaModel):
             region_mask['L'] = z_score_region.copy()
             region_mask['L'][z_score_region > 0] = np.nan
 
+            if keep_b_evs: # if we are looking at both hands/legs
+                z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True).item()['z_score']
+
+                region_mask['B'] = z_score_region.copy()
+                region_mask['B'][z_score_region < z_threshold] = np.nan
+
         # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant)
+        events_avg = self.get_avg_events(participant, keep_b_evs)
 
         if custom_dm: # if we want to make the dm 
 
             design_matrix = self.make_custom_dm(events_avg, 
                                                 osf = 100, data_len_TR = prediction.shape[-1], 
                                                 TR = self.MRIObj.TR, 
-                                                hrf_params = [1,1,0], hrf_onset = 0)
+                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
             hrf_model = 'custom'
 
         else: # if we want to use nilearn function
@@ -1027,11 +1079,15 @@ class GLM_Model(somaModel):
 
             region_betas['L'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['left_hand']]
             region_betas['L'] = np.vstack(region_betas['L'])
+
+            if keep_b_evs: # if we are looking at both hands
+                region_betas['B'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['both_hand']]
+                region_betas['B'] = np.vstack(region_betas['B'])
         
         # calculate COM for all vertices
         if isinstance(region_betas, dict):
             
-            for side in ['L', 'R']:
+            for side in region_betas.keys():
                 COM_all = COM(region_betas[side])
             
                 COM_surface = np.zeros(region_mask[side].shape); COM_surface[:] = np.nan

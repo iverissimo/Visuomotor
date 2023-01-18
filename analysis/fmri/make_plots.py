@@ -140,7 +140,8 @@ elif task == 'soma':
 
         ## loop over all subjects 
         for pp in Visuomotor_data.sj_num:
-            plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm)
+            plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm, 
+                                        keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
 
     elif py_cmd == 'show_click':
