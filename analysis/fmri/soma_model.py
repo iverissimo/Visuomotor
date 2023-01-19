@@ -1114,11 +1114,58 @@ class GLM_Model(somaModel):
 
             fixed_effects_T = np.nanmean(all_runs_effects[key_name]['effect_size'], 
                                         axis = 0)/np.sqrt((np.nanmean(all_runs_effects[key_name]['effect_variance'], 
-                                                            axis = 0)/len(all_runs_effects[key_name]['effect_variance']))) 
+                                                            axis = 0))) 
 
             # save
             filename = op.join(out_dir, 'fixed_effects_T_{kn}_contrast.npy'.format(kn = key_name))
             np.save(filename, fixed_effects_T[0])
+
+
+    def average_betas(self, participant, fit_type = 'loo_run', weighted_avg = True, runs2load = [1,2,3,4]):
+
+        """
+        Helper function to load and average betas 
+        from several runs
+        """
+
+        # loop over runs
+        all_betas = []
+        all_r2 = []
+
+        for run_key in runs2load: 
+            
+            ## load estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_key).zfill(2))), 
+                                            allow_pickle=True).item()
+
+            # append beta values
+            all_betas.append(soma_estimates['betas'][np.newaxis,...])
+            # append r2/CV-r2
+            if fit_type == 'loo_run':
+                all_r2.append(soma_estimates['cv_r2'][np.newaxis,...])
+            else:
+                all_r2.append(soma_estimates['r2'][np.newaxis,...])
+
+        # stack
+        all_betas = np.vstack(all_betas) #[runs, vertex, betas]
+        all_r2 = np.vstack(all_r2) #[runs, vertex]
+
+        if weighted_avg:
+            # calculate weighted average for each beta regressor
+            avg_betas = []
+
+            for ind in np.arange(all_betas.shape[-1]):
+                
+                avg_betas.append(np.ma.average(all_betas[...,ind], axis=0, weights=all_r2))
+                
+            avg_betas = np.stack(avg_betas, axis = -1)
+        else:
+            avg_betas = np.nanmean(all_betas, axis = 0)
+        
+        avg_r2 = np.nanmean(all_r2, axis = 0)
+
+        return avg_betas, avg_r2
 
     
     def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', 
