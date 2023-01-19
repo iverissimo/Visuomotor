@@ -1279,7 +1279,7 @@ class GLM_Model(somaModel):
                         end_time = end_time,
                         dur  = end_time - start_time))
         
-    def make_COM_maps(self, participant, region = 'face', custom_dm = True,
+    def make_COM_maps(self, participant, region = 'face', custom_dm = True, fixed_effects = True, nr_TRs = 141,
                         hrf_model = 'glover', z_threshold = 3.1, fit_type = 'mean_run', keep_b_evs = False):
 
         """ Make COM maps for a specific region
@@ -1291,36 +1291,64 @@ class GLM_Model(somaModel):
             participant ID           
         """
 
-        ## make new out dir, depeding on our HRF approach
-        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
-                                        'sub-{sj}'.format(sj = participant), fit_type)
-        # if output path doesn't exist, create it
-        os.makedirs(out_dir, exist_ok = True)
+        # if we want to used loo betas, and fixed effects t-stat
+        if (fit_type == 'loo_run') and (fixed_effects == True): 
+            ## make new out dir, depeding on our HRF approach
+            out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
+                                            'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+            # if output path doesn't exist, create it
+            os.makedirs(out_dir, exist_ok = True)
 
-        # path where Region contrasts were stored
-        stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                                'sub-{sj}'.format(sj = participant), fit_type)
+            # path where Region contrasts were stored
+            stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
+                                                    'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
 
-        # load GLM estimates, and get betas and prediction
-        soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                        allow_pickle=True).item()
-        betas = soma_estimates['betas']
-        prediction = soma_estimates['prediction']
-        r2 = soma_estimates['r2']
+            # get list with gii files
+            gii_filenames = self.get_soma_file_list(participant, 
+                                                file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+            # get all run lists
+            run_loo_list = self.get_run_list(gii_filenames)
+
+            ## get average beta values 
+            betas, _ = self.average_betas(participant, fit_type = fit_type, 
+                                                        weighted_avg = True, runs2load = run_loo_list)
+
+        else:
+            ## make new out dir, depeding on our HRF approach
+            out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
+                                            'sub-{sj}'.format(sj = participant), fit_type)
+            # if output path doesn't exist, create it
+            os.makedirs(out_dir, exist_ok = True)
+
+            # path where Region contrasts were stored
+            stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
+                                                    'sub-{sj}'.format(sj = participant), fit_type)
+
+            # load GLM estimates, and get betas and prediction
+            betas = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()['betas']
 
         # load z-score localizer area, for region movements
         if region == 'face':
-            z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
+            if (fit_type == 'loo_run') and (fixed_effects == True): 
+                z_score_region = np.load(op.join(stats_dir, 'fixed_effects_T_{r}_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True)
+            else:
+                z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
                                     allow_pickle=True).item()['z_score']
 
             # mask for relevant vertices
             region_mask = z_score_region.copy(); 
             region_mask[z_score_region < z_threshold] = np.nan
         else:
-            # we are going to look at left and right individually, so there are 2 region masks
-            z_score_region = np.load(op.join(stats_dir, 'stats_{r}_RvsL_contrast.npy'.format(r=region)), 
-                                    allow_pickle=True).item()['z_score']
+            if (fit_type == 'loo_run') and (fixed_effects == True): 
+                z_score_region = np.load(op.join(stats_dir, 'fixed_effects_T_{r}_RvsL_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True)
+            else:
+                # we are going to look at left and right individually, so there are 2 region masks
+                z_score_region = np.load(op.join(stats_dir, 'stats_{r}_RvsL_contrast.npy'.format(r=region)), 
+                                        allow_pickle=True).item()['z_score']
 
             region_mask = {}
             region_mask['R'] = z_score_region.copy()
@@ -1329,8 +1357,12 @@ class GLM_Model(somaModel):
             region_mask['L'][z_score_region > 0] = np.nan
 
             if keep_b_evs: # if we are looking at both hands/legs
-                z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
-                                    allow_pickle=True).item()['z_score']
+                if (fit_type == 'loo_run') and (fixed_effects == True): 
+                    z_score_region = np.load(op.join(stats_dir, 'fixed_effects_T_{r}_contrast.npy'.format(r=region)), 
+                                        allow_pickle=True)
+                else:
+                    z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
+                                        allow_pickle=True).item()['z_score']
 
                 region_mask['B'] = z_score_region.copy()
                 region_mask['B'][z_score_region < z_threshold] = np.nan
@@ -1341,7 +1373,7 @@ class GLM_Model(somaModel):
         if custom_dm: # if we want to make the dm 
 
             design_matrix = self.make_custom_dm(events_avg, 
-                                                osf = 100, data_len_TR = prediction.shape[-1], 
+                                                osf = 100, data_len_TR = nr_TRs, 
                                                 TR = self.MRIObj.TR, 
                                                 hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
                                                 hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
@@ -1350,7 +1382,7 @@ class GLM_Model(somaModel):
         else: # if we want to use nilearn function
 
             # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(prediction.shape[-1]))
+            frame_times = self.MRIObj.TR * (np.arange(nr_TRs))
 
             # Create the design matrix, hrf model containing Glover model 
             design_matrix = make_first_level_design_matrix(frame_times,
