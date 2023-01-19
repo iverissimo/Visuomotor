@@ -183,11 +183,18 @@ elif task == 'soma':
             ## make RF model object
             data_RFmodel = somaRF_Model(Visuomotor_data)
 
+            if Visuomotor_data.params['fitting']['soma']['keep_b_evs']:
+                keep_b_evs = True
+                region_keys = ['face', 'right_hand', 'left_hand', 'both_hand']
+            else:
+                keep_b_evs = False
+                region_keys = ['face', 'right_hand', 'left_hand']
+
             ## loop over all subjects 
             for pp in Visuomotor_data.sj_num:
                 data_RFmodel.fit_data(pp, somaModelObj = data_model, betas_model = 'glm',
-                                        fit_type = 'mean_run', nr_grid = 100, n_jobs = n_jobs,
-                                        region_keys = ['face', 'right_hand', 'left_hand'],
+                                        fit_type = run_type, nr_grid = 100, n_jobs = n_jobs,
+                                        region_keys = region_keys, keep_b_evs = keep_b_evs,
                                         custom_dm = custom_dm)
 
 

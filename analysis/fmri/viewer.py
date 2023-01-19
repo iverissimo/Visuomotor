@@ -635,30 +635,60 @@ class somaViewer:
                                         with_colorbar=False,with_curvature=True,with_sulci=True)
 
 
-    def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', 
+    def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
                                     n_bins = 256, plot_cuttout = False, custom_dm = True, keep_b_evs = False):
 
         """
         plot COM maps from GLM betas
         """
 
-        fig_pth = op.join(self.outputdir, 'glm_COM_maps',
-                                            'sub-{sj}'.format(sj = participant), fit_type)
-        # if output path doesn't exist, create it
-        os.makedirs(fig_pth, exist_ok = True)
+        # if we want to used loo betas, and fixed effects t-stat
+        if (fit_type == 'loo_run') and (fixed_effects == True): 
 
-        # load GLM estimates, and get betas and prediction
-        soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
-                                        'sub-{sj}'.format(sj = participant), 
-                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                        allow_pickle=True).item()
-        r2 = soma_estimates['r2']
+            fig_pth = op.join(self.outputdir, 'glm_COM_maps',
+                                                'sub-{sj}'.format(sj = participant), 
+                                                'fixed_effects', fit_type)
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+
+            # get list with gii files
+            gii_filenames = self.somaModelObj.get_soma_file_list(participant, 
+                                                file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
+            # get all run lists
+            run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+
+            ## get average beta values 
+            _, r2 = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
+                                                        weighted_avg = True, runs2load = run_loo_list)
+
+            # path to COM betas
+            com_filepath = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant), 
+                                                    'fixed_effects', fit_type)
+
+        else:
+            fig_pth = op.join(self.outputdir, 'glm_COM_maps',
+                                                'sub-{sj}'.format(sj = participant), fit_type)
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+
+            # load GLM estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                            'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()
+            r2 = soma_estimates['r2']
+
+            # path to COM betas
+            com_filepath = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant), 
+                                                    fit_type)
 
         # normalize the distribution, for better visualization
-        region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
+        region_mask_alpha = normalize(np.clip(r2, 0, .6)) 
 
         # call COM function
-        self.somaModelObj.make_COM_maps(participant, region = region, fit_type = fit_type,
+        self.somaModelObj.make_COM_maps(participant, region = region, fit_type = fit_type, fixed_effects = fixed_effects,
                                                     custom_dm = custom_dm, keep_b_evs = keep_b_evs)
 
         sides_list = ['L', 'R'] if keep_b_evs == False else ['L', 'R', 'B']
@@ -666,9 +696,7 @@ class somaViewer:
         ## load COM values and plot
         if region == 'face':
 
-            com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
-                                                    'sub-{sj}'.format(sj = participant), 
-                                                    fit_type, 'COM_reg-face.npy')
+            com_betas_dir = op.join(com_filepath, 'COM_reg-face.npy')
 
             COM_region = np.load(com_betas_dir, allow_pickle = True)
             
@@ -725,9 +753,7 @@ class somaViewer:
         else:
             for side in sides_list:
                 
-                com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
-                                                    'sub-{sj}'.format(sj = participant), fit_type,
-                                                    'COM_reg-upper_limb_{s}.npy'.format(s=side))
+                com_betas_dir = op.join(com_filepath, 'COM_reg-upper_limb_{s}.npy'.format(s=side))
 
                 COM_region = np.load(com_betas_dir, allow_pickle = True)
                 

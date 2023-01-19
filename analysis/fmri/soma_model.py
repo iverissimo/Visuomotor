@@ -1368,7 +1368,7 @@ class GLM_Model(somaModel):
                 region_mask['B'][z_score_region < z_threshold] = np.nan
 
         # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant, keep_b_evs)
+        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
 
         if custom_dm: # if we want to make the dm 
 
@@ -2420,8 +2420,8 @@ class somaRF_Model(somaModel):
 
     def fit_data(self, participant, somaModelObj = None, betas_model = 'glm',
                                     fit_type = 'mean_run', nr_grid = 100, n_jobs = 16,
-                                    region_keys = ['face', 'right_hand', 'left_hand'],
-                                    hrf_model = 'glover', custom_dm = True):
+                                    region_keys = ['face', 'right_hand', 'left_hand'], nr_TRs = 141,
+                                    hrf_model = 'glover', custom_dm = True, keep_b_evs = False):
 
         """ fit gauss population Response Field model to participant betas 
         (from previously run GLM)
@@ -2437,32 +2437,42 @@ class somaRF_Model(somaModel):
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
-        ####### should add an if statement, for the case when we load glm single betas #####
-        # load GLM estimates, and get betas and prediction
-        soma_estimates = np.load(op.join(somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                        allow_pickle=True).item()
-        betas = soma_estimates['betas']
-        prediction = soma_estimates['prediction']
-        r2 = soma_estimates['r2']
+        # if leave one out, get average of CV betas
+        if fit_type == 'loo_run':
+            # get list with gii files
+            gii_filenames = somaModelObj.get_soma_file_list(participant, 
+                                                file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+            # get all run lists
+            run_loo_list = somaModelObj.get_run_list(gii_filenames)
+
+            ## get average beta values 
+            betas, _ = somaModelObj.average_betas(participant, fit_type = fit_type, 
+                                                        weighted_avg = True, runs2load = run_loo_list)
+        else:
+            # load GLM estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()
+            betas = soma_estimates['betas']
 
         # make average event file for pp, based on events file
-        events_avg = somaModelObj.get_avg_events(participant)
+        events_avg = somaModelObj.get_avg_events(participant, keep_b_evs = keep_b_evs)
 
         if custom_dm: # if we want to make the dm 
 
             # and design matrix
             design_matrix = somaModelObj.make_custom_dm(events_avg, 
-                                                        osf = 100, data_len_TR = prediction.shape[-1], 
+                                                        osf = 100, data_len_TR = nr_TRs, 
                                                         TR = self.MRIObj.TR, 
-                                                        hrf_params = [1,1,0], hrf_onset = 0)
+                                                        hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                        hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
 
             hrf_model = 'custom'
 
         else: # if we want to use nilearn function
 
             # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(prediction.shape[-1]))
+            frame_times = self.MRIObj.TR * (np.arange(nr_TRs))
 
             # Create the design matrix, hrf model containing Glover model 
             design_matrix = make_first_level_design_matrix(frame_times,

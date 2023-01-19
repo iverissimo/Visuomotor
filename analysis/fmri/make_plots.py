@@ -61,6 +61,10 @@ CLI.add_argument("--task",
                 help = 'What task we want to run? pRF vs soma [Default]'
                 )
 
+CLI.add_argument("--run_type", 
+                default = 'mean_run',
+                help="Type of run to fit (mean_run [default], 1, loo_run, ...)")
+
 # parse the command line
 args = CLI.parse_args()
 
@@ -71,6 +75,7 @@ exclude_sj = args.exclude
 py_cmd = args.cmd
 model_name = args.model
 task = args.task
+run_type = args.run_type
 
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
@@ -91,7 +96,7 @@ if task in ['pRF', 'prf']:
 
     if py_cmd == 'show_click':
 
-        plotter.open_click_viewer(Visuomotor_data.sj_num[0], fit_type = 'mean_run', 
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], fit_type = run_type, 
                                             prf_model_name = model_name, 
                                             mask_arr = False, rsq_threshold = .14)
 
@@ -140,7 +145,7 @@ elif task == 'soma':
 
         ## loop over all subjects 
         for pp in Visuomotor_data.sj_num:
-            plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm, 
+            plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm, fit_type = run_type,
                                         keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
 
