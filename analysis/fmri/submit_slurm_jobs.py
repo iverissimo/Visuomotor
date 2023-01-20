@@ -92,6 +92,10 @@ CLI.add_argument("--email",
                 type = int, 
                 default = 0,
                 help="Send job email 1/0 [default 0]")
+CLI.add_argument("--hours", 
+                type = int, 
+                default = 10,
+                help="Number of hours to set as time limit for job")
 
 
 # parse the command line
@@ -117,7 +121,8 @@ node_name = args.node_name
 partition_name = args.partition_name
 batch_mem_Gib = args.batch_mem_Gib
 
-run_time = '10:00:00'
+hours = args.hours
+run_time = '{h}:00:00'.format(str(hours)) #'10:00:00'
 send_email = bool(args.email)
 
 
