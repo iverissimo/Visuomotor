@@ -220,7 +220,7 @@ for pp in Visuomotor_data.sj_num:
 
     wait          # wait until programs are finished
 
-    rsync -chavzP $TMPDIR/derivatives/ $DERIV_DIR
+    rsync -chavzP --exclude=".*" $TMPDIR/derivatives/ $DERIV_DIR
 
     wait          # wait until programs are finished
 
@@ -268,12 +268,19 @@ for pp in Visuomotor_data.sj_num:
 $START_EMAIL
 
 # make derivatives dir in node and sourcedata because we want to access behav files
-mkdir -p $TMPDIR/derivatives/glm_fits/sub-$SJ_NR
-mkdir -p $TMPDIR/derivatives/$FITFOLDER/sub-$SJ_NR
+mkdir -p $TMPDIR/derivatives/{glm_fits,$FITFOLDER}/sub-$SJ_NR
+mkdir -p $TMPDIR/derivatives/post_fmriprep/$SPACE/sub-$SJ_NR
 mkdir -p $TMPDIR/sourcedata/sub-$SJ_NR
 
 wait
+
 cp -r $DERIV_DIR/glm_fits/sub-$SJ_NR $TMPDIR/derivatives/glm_fits/
+
+wait
+
+wait
+
+cp -r $DERIV_DIR/post_fmriprep/$SPACE/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/$SPACE
 
 wait
 
@@ -294,7 +301,7 @@ wait
 
 wait          # wait until programs are finished
 
-rsync -chavzP $TMPDIR/derivatives/ $DERIV_DIR
+rsync -chavzP --exclude=".*" $TMPDIR/derivatives/ $DERIV_DIR
 
 wait          # wait until programs are finished
 
@@ -313,6 +320,7 @@ $END_EMAIL
         working_string = working_string.replace('$BD', batch_dir)
         working_string = working_string.replace('$DERIV_DIR', Visuomotor_data.derivatives_pth)
         working_string = working_string.replace('$SOURCE_DIR', Visuomotor_data.sourcedata_pth)
+        working_string = working_string.replace('$SPACE', Visuomotor_data.sj_space)
 
         print(working_string)
 
