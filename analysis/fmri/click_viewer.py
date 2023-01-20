@@ -67,7 +67,7 @@ class visualize_on_click:
 
     def set_figure(self, participant, pp_prf_est_dict = None, pp_prf_models = None,
                     task2viz = 'soma', prf_run_type = 'mean_run', soma_run_type = 'mean_run',
-                    pRFmodel_name = 'css', somamodel_name = 'glm', custom_dm = True):
+                    pRFmodel_name = 'css', somamodel_name = 'glm', custom_dm = True, keep_b_evs = False):
 
         """
         Set base figure with placeholders 
@@ -84,6 +84,9 @@ class visualize_on_click:
 
         ## set participant ID
         self.participant = participant
+
+        ## if we are including both hand regressors or not
+        self.keep_b_evs = keep_b_evs
 
         ## set run and session to load
         self.run_type = {'prf': prf_run_type, 'soma': soma_run_type}
@@ -117,14 +120,15 @@ class visualize_on_click:
                 self.soma_r2 = soma_estimates['r2']
 
                 # make average event file for pp, based on events file
-                events_avg = self.SomaModelObj.get_avg_events(participant)
+                events_avg = self.SomaModelObj.get_avg_events(participant, keep_b_evs = keep_b_evs)
 
                 if custom_dm: # if we want to make the dm 
 
                     design_matrix = self.SomaModelObj.make_custom_dm(events_avg, 
                                                         osf = 100, data_len_TR = self.soma_prediction.shape[-1], 
                                                         TR = self.SomaModelObj.MRIObj.TR, 
-                                                        hrf_params = [1,1,0], hrf_onset = 0)
+                                                        hrf_params = self.SomaModelObj.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                        hrf_onset = self.SomaModelObj.MRIObj.params['fitting']['soma']['hrf_onset'])
                     hrf_model = 'custom'
 
                 else: # if we want to use nilearn function
@@ -496,6 +500,10 @@ class visualize_on_click:
                 cortex.quickshow(self.images['LH'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
                             fig = self.flatmap_ax, with_colorbar = False)
                 self.flatmap_ax.set_title('Soma Left Hand')
+            elif (event.key == '5' and self.keep_b_evs):
+                cortex.quickshow(self.images['BH'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                            fig = self.flatmap_ax, with_colorbar = False)
+                self.flatmap_ax.set_title('Soma Both Hands')
 
             if self.somamodel_name == 'somaRF':
                 if event.key == '5':

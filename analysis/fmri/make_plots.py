@@ -151,7 +151,8 @@ elif task == 'soma':
 
     elif py_cmd == 'show_click':
 
-        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name, data_RFmodel = data_RFmodel)
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name, 
+                                            data_RFmodel = data_RFmodel, keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
 
 

@@ -49,10 +49,12 @@ class somaViewer:
         self.pysub = pysub
 
     
-    def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None):
+    def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None,
+                                            fit_type = 'mean_run', keep_b_evs = False, fixed_effects = True):
 
         """
-        quick function to open click viewer, need to re furbish later
+        Opens viewer with flatmap, timeseries and beta estimates
+        of GLM model fit or soma RF fitting
         """
 
         # get list with gii files
@@ -65,12 +67,29 @@ class somaViewer:
         # average runs
         data2fit = np.nanmean(all_data, axis = 0)
 
-        # load GLM estimates, and get betas and prediction
-        soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                        'mean_run', 'estimates_run-mean.npy'), allow_pickle=True).item()
-        betas = soma_estimates['betas']
-        prediction = soma_estimates['prediction']
-        r2 = soma_estimates['r2']
+        # if we want to used loo betas, and fixed effects t-stat
+        if (fit_type == 'loo_run') and (fixed_effects == True): 
+            # get all run lists
+            run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+
+            ## get average beta values 
+            _, r2 = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
+                                                        weighted_avg = True, runs2load = run_loo_list)
+
+            ## COM map dir
+            com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+
+        else:
+            # load GLM estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()
+            r2 = soma_estimates['r2']
+
+            ## COM map dir
+            com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                    'sub-{sj}'.format(sj = participant), fit_type)
 
         ## Load click viewer plotted object
         click_plotter = click_viewer.visualize_on_click(self.somaModelObj.MRIObj, 
@@ -80,17 +99,13 @@ class somaViewer:
                                                         pysub = self.pysub)
 
         ## set figure, and also load estimates and models
-        click_plotter.set_figure(participant, custom_dm = custom_dm, 
-                                            task2viz = 'soma', soma_run_type = 'mean_run',
+        click_plotter.set_figure(participant, custom_dm = custom_dm, keep_b_evs = keep_b_evs,
+                                            task2viz = 'soma', soma_run_type = fit_type,
                                             somamodel_name = model2plot)
 
         # normalize the distribution, for better visualization
-        region_mask_alpha = normalize(np.clip(r2,.2,.6)) 
+        region_mask_alpha = normalize(np.clip(r2,0,.6)) 
         
-        ## COM map dir
-        com_betas_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
-                                                'sub-{sj}'.format(sj = participant))
-
         # if model is GLM, load COM maps 
         if model2plot == 'glm':
 
@@ -135,6 +150,18 @@ class somaViewer:
                                                         vmin=0, vmax=4,
                                                         vmin2 = 0, vmax2 = 1,
                                                         cmap = col2D_name)
+
+            if keep_b_evs:
+                ########## load both hand plots ##########
+                
+                COM_BH = np.load(op.join(com_betas_dir, 'COM_reg-upper_limb_B.npy'), allow_pickle = True)
+
+                click_plotter.images['BH'] = cortex.Vertex2D(COM_BH, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=4,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = col2D_name)
 
         elif model2plot == 'somaRF':
             
