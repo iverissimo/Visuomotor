@@ -122,7 +122,7 @@ partition_name = args.partition_name
 batch_mem_Gib = args.batch_mem_Gib
 
 hours = args.hours
-run_time = '{h}:00:00'.format(str(hours)) #'10:00:00'
+run_time = '{h}:00:00'.format(h = str(hours)) #'10:00:00'
 send_email = bool(args.email)
 
 
