@@ -171,6 +171,8 @@ class somaViewer:
             face_center = np.array(click_plotter.RF_estimates['face']['mu'])#.copy()
             face_center[np.isnan(face_mask)] = np.nan
 
+            region_mask_alpha = np.array(click_plotter.RF_estimates['face']['r2']) # use RF model R2 as mask
+
             # create costume colormp J4
             n_bins = 256
             col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
@@ -200,6 +202,8 @@ class somaViewer:
             RH_center = np.array(click_plotter.RF_estimates['RH']['mu'])#.copy()
             RH_center[np.isnan(RH_mask)] = np.nan
 
+            region_mask_alpha = np.array(click_plotter.RF_estimates['RH']['r2']) # use RF model R2 as mask
+
             col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
                                                                     bins = n_bins, 
                                                                     cmap_name = 'rainbow_r'))[-1])[0]
@@ -228,6 +232,8 @@ class somaViewer:
             LH_center = np.array(click_plotter.RF_estimates['LH']['mu'])#.copy()
             LH_center[np.isnan(LH_mask)] = np.nan
 
+            region_mask_alpha = np.array(click_plotter.RF_estimates['LH']['r2']) # use RF model R2 as mask
+
             click_plotter.images['LH'] = cortex.Vertex2D(LH_center, 
                                                         region_mask_alpha,
                                                         subject = self.pysub,
@@ -253,6 +259,8 @@ class somaViewer:
                 BH_mask = np.load(op.join(com_betas_dir, 'zmask_reg-upper_limb_B.npy'), allow_pickle=True)
                 BH_center = np.array(click_plotter.RF_estimates['BH']['mu'])#.copy()
                 BH_center[np.isnan(BH_mask)] = np.nan
+
+                region_mask_alpha = np.array(click_plotter.RF_estimates['BH']['r2']) # use RF model R2 as mask
 
                 click_plotter.images['BH'] = cortex.Vertex2D(BH_center, 
                                                             region_mask_alpha,
