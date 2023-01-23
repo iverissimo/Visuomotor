@@ -167,6 +167,11 @@ class visualize_on_click:
                                         'RH': [ind for ind, name in enumerate(self.soma_regressors) if name in self.RF_reg_names['RH']]
                                         }
 
+                    if self.keep_b_evs:
+                        self.RF_estimates['BH'] = np.load(op.join(RF_dir, 'RF_grid_estimates_region-both_hand.npy'), 
+                                                            allow_pickle=True).item()
+                        self.RF_reg_names['BH'] = self.SomaRF_ModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['both_hand']
+                        self.RF_reg_inds['BH'] = [ind for ind, name in enumerate(self.soma_regressors) if name in self.RF_reg_names['BH']]
                                         
             
         ## set figure grid 
@@ -219,7 +224,8 @@ class visualize_on_click:
             
             elif self.somamodel_name == 'somaRF':
 
-                gs = self.full_fig.add_gridspec(4, 6)
+                gs = self.full_fig.add_gridspec(4, 7) if self.keep_b_evs == True else self.full_fig.add_gridspec(4, 6)
+                
 
                 self.flatmap_ax = self.full_fig.add_subplot(gs[:3, :])
                 self.flatmap_ax.set_title('flatmap')
@@ -233,6 +239,9 @@ class visualize_on_click:
                 self.RH_betas_ax.set_title('RH')
                 self.LH_betas_ax = self.full_fig.add_subplot(gs[3, 5], sharey = self.face_betas_ax)
                 self.LH_betas_ax.set_title('LH')
+                if self.keep_b_evs:
+                    self.BH_betas_ax = self.full_fig.add_subplot(gs[3, 6], sharey = self.face_betas_ax)
+                    self.BH_betas_ax.set_title('BH')
 
 
     def get_vertex_prf_model_tc(self, vertex):
@@ -390,6 +399,8 @@ class visualize_on_click:
                 self.face_betas_ax.clear()
                 self.RH_betas_ax.clear()
                 self.LH_betas_ax.clear()
+                if self.keep_b_evs:
+                    self.BH_betas_ax.clear()
 
                 # plot betas for each region
                 # face
@@ -427,6 +438,18 @@ class visualize_on_click:
                                                                             slope = self.RF_estimates['LH']['slope'][vertex], 
                                                                             nr_points = len(self.RF_reg_inds['LH'])),
                                         c = 'red',lw=3)
+                # BH
+                if self.keep_b_evs:
+                    self.BH_betas_ax.bar(np.arange(len(self.RF_reg_inds['BH'])), self.soma_betas[vertex][self.RF_reg_inds['BH']])
+                    self.BH_betas_ax.set_xticks(np.arange(len(self.RF_reg_inds['BH'])))
+                    self.BH_betas_ax.set_xticklabels(self.RF_reg_names['BH'], rotation=80)
+                    self.BH_betas_ax.set_title('BH')
+                    # add predicted tc
+                    self.BH_betas_ax.plot(self.SomaRF_ModelObj.return_prediction(mu = self.RF_estimates['BH']['mu'][vertex], 
+                                                                                size = self.RF_estimates['BH']['size'][vertex], 
+                                                                                slope = self.RF_estimates['BH']['slope'][vertex], 
+                                                                                nr_points = len(self.RF_reg_inds['BH'])),
+                                            c = 'red',lw=3)
 
 
     def onclick(self, event):
@@ -506,17 +529,21 @@ class visualize_on_click:
                 self.flatmap_ax.set_title('Soma Both Hands')
 
             if self.somamodel_name == 'somaRF':
-                if event.key == '5':
+                if event.key == '6':
                     cortex.quickshow(self.images['face_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
                             fig = self.flatmap_ax, with_colorbar = False)
                     self.flatmap_ax.set_title('Soma face size')
-                elif event.key == '6':
+                elif event.key == '7':
                     cortex.quickshow(self.images['RH_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
                             fig = self.flatmap_ax, with_colorbar = False)
                     self.flatmap_ax.set_title('Soma RH size')
-                elif event.key == '7':
+                elif event.key == '8':
                     cortex.quickshow(self.images['LH_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
                             fig = self.flatmap_ax, with_colorbar = False)
                     self.flatmap_ax.set_title('Soma LH size')
+                elif (event.key == '9' and self.keep_b_evs):
+                    cortex.quickshow(self.images['BH_size'], with_rois = with_rois, with_curvature = True, with_sulci = with_sulci, with_labels = False,
+                                fig = self.flatmap_ax, with_colorbar = False)
+                    self.flatmap_ax.set_title('Soma BH size')
 
         plt.draw()

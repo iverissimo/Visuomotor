@@ -246,6 +246,31 @@ class somaViewer:
                                                             vmin2 = 0, vmax2 = 1,
                                                             cmap = 'hot_alpha')
 
+            if keep_b_evs:
+                
+                ########## load both hand plots ##########
+                
+                BH_mask = np.load(op.join(com_betas_dir, 'zmask_reg-upper_limb_B.npy'), allow_pickle=True)
+                BH_center = np.array(click_plotter.RF_estimates['BH']['mu'])#.copy()
+                BH_center[np.isnan(BH_mask)] = np.nan
+
+                click_plotter.images['BH'] = cortex.Vertex2D(BH_center, 
+                                                            region_mask_alpha,
+                                                            subject = self.pysub,
+                                                            vmin=0, vmax=4,
+                                                            vmin2 = 0, vmax2 = 1,
+                                                            cmap = col2D_name)
+
+                # BH size plots
+                BH_size = np.array(click_plotter.RF_estimates['BH']['size'])#.copy()
+                BH_size[np.isnan(BH_mask)] = np.nan
+
+                click_plotter.images['BH_size'] = cortex.Vertex2D(BH_size, 
+                                                                region_mask_alpha,
+                                                                subject = self.pysub,
+                                                                vmin=0, vmax=4,
+                                                                vmin2 = 0, vmax2 = 1,
+                                                                cmap = 'hot_alpha')
 
         ## soma rsq
         click_plotter.images['Soma_rsq'] = cortex.Vertex(r2, 
