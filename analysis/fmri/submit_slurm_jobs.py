@@ -274,7 +274,7 @@ $START_EMAIL
 
 # make derivatives dir in node and sourcedata because we want to access behav files
 mkdir -p $TMPDIR/derivatives/{glm_fits,$FITFOLDER}/sub-$SJ_NR
-mkdir -p $TMPDIR/derivatives/post_fmriprep/$SPACE/sub-$SJ_NR
+mkdir -p $TMPDIR/derivatives/post_fmriprep/$SPACE/soma/sub-$SJ_NR
 mkdir -p $TMPDIR/sourcedata/sub-$SJ_NR
 
 wait
@@ -285,7 +285,7 @@ wait
 
 wait
 
-cp -r $DERIV_DIR/post_fmriprep/$SPACE/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/$SPACE
+cp -r $DERIV_DIR/post_fmriprep/$SPACE/soma/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/soma/$SPACE
 
 wait
 
