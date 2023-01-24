@@ -1165,7 +1165,7 @@ class GLM_Model(somaModel):
         
         avg_r2 = np.nanmean(all_r2, axis = 0)
 
-        return avg_betas, avg_r2
+        return avg_betas.data, avg_r2
 
     
     def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', 
