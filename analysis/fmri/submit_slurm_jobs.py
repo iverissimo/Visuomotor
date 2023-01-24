@@ -285,7 +285,7 @@ wait
 
 wait
 
-cp -r $DERIV_DIR/post_fmriprep/$SPACE/soma/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/soma/$SPACE
+cp -r $DERIV_DIR/post_fmriprep/$SPACE/soma/sub-$SJ_NR $TMPDIR/derivatives/post_fmriprep/$SPACE/soma/
 
 wait
 
