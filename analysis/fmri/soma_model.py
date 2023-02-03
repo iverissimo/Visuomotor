@@ -1131,6 +1131,7 @@ class GLM_Model(somaModel):
         # loop over runs
         all_betas = []
         all_r2 = []
+        weight_arr = []
 
         for run_key in runs2load: 
             
@@ -1143,13 +1144,18 @@ class GLM_Model(somaModel):
             all_betas.append(soma_estimates['betas'][np.newaxis,...])
             # append r2/CV-r2
             if fit_type == 'loo_run':
+                tmp_arr = soma_estimates['cv_r2'].copy()
+                tmp_arr[tmp_arr <= 0] = 0 # to remove negative values, that result in unpredictable outcome for weights
+                weight_arr.append(tmp_arr[np.newaxis,...])
                 all_r2.append(soma_estimates['cv_r2'][np.newaxis,...])
             else:
                 all_r2.append(soma_estimates['r2'][np.newaxis,...])
+                weight_arr.append(soma_estimates['r2'][np.newaxis,...])
 
         # stack
         all_betas = np.vstack(all_betas) #[runs, vertex, betas]
         all_r2 = np.vstack(all_r2) #[runs, vertex]
+        weight_arr = np.vstack(weight_arr) #[runs, vertex]
 
         if weighted_avg:
             # calculate weighted average for each beta regressor
@@ -1157,7 +1163,7 @@ class GLM_Model(somaModel):
 
             for ind in np.arange(all_betas.shape[-1]):
                 
-                avg_betas.append(np.ma.average(all_betas[...,ind], axis=0, weights=all_r2))
+                avg_betas.append(np.ma.average(all_betas[...,ind], axis=0, weights=weight_arr))
                 
             avg_betas = np.stack(avg_betas, axis = -1)
         else:
@@ -2400,7 +2406,7 @@ class somaRF_Model(somaModel):
 
         # make grid of center position and size
         grid_center = np.linspace(0, len(regs2fit), nr_grid) - .5
-        grid_size = np.linspace(0.2, len(regs2fit), nr_grid)
+        grid_size = np.linspace(0.25, len(regs2fit)-1, nr_grid)
 
         # create grid predictions
         grid_predictions = self.create_grid_predictions(grid_center, grid_size, reg_names = regs2fit)
@@ -2508,6 +2514,27 @@ class somaRF_Model(somaModel):
         """
 
         return self.gauss1D_cart(np.arange(nr_points), mu = mu, sigma = size) * slope
+
+
+    def load_estimates(self, participant, betas_model = 'glm', fit_type = 'mean_run',
+                            region_keys = ['face', 'right_hand', 'left_hand', 'both_hand']):
+
+        """
+        Helper function to load fitted estimates
+        """
+
+        # set outputdir for participant
+        RF_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                    betas_model, fit_type)
+
+        # make estimates dict, for all regions of interest
+        RF_estimates = {}
+        for region in region_keys:
+            RF_estimates[region] = np.load(op.join(RF_dir, 
+                                                'RF_grid_estimates_region-{r}.npy'.format(r=region)), 
+                                                allow_pickle=True).item()
+
+        return RF_estimates
 
 
         

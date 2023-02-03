@@ -93,6 +93,7 @@ plotting:
     glasser_rois:
       M1: ['4'] # primary motor cortex (Brodmann area 4)
       S1: ['3a', '3b', '1', '2'] #['3b'] #['3a', '3b', '1'] # primary sensory cortex (Brodman area 3) 
+      S2: ['OP1']
       SMA: ['6mp', '6ma', 'SCEF'] # supplementary motor areas?
       CingMA: ['24dd', '24dv'] # cingulate motor cortex
       sPMC: ['6d', '6a'] # superior premotor areas
