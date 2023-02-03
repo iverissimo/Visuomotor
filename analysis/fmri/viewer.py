@@ -766,6 +766,165 @@ class somaViewer:
                                     fig_abs_name = fig_name.replace('.png', '_{r}.png'.format(r=region))) 
 
 
+    def plot_betas_over_y(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
+                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 150,
+                                all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'],
+                                            'S2': ['OP1'],'SMA': ['6mp', '6ma', 'SCEF'],
+                                            'sPMC': ['6d', '6a'],'iPMC': ['6v', '6r']}):
+                                            
+        """
+        plot imshow
+        showing beta distribution over y axis,
+        for each regressor of interest
+        and for selected ROIs
+        """
+        # hemisphere labels
+        hemi_labels = ['LH', 'RH']
+
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
+        ## get surface x and y coordinates
+        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+                                                                        merge = True)
+
+        # loop over participant list
+        betas = []
+        r2 = []
+        for pp in participant_list:
+            
+            ## LOAD R2
+            if fit_type == 'loo_run':
+                # get list with gii files
+                gii_filenames = self.somaModelObj.get_soma_file_list(pp, 
+                                                    file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
+                # get all run lists
+                run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+
+                ## get average beta values (all used in GLM)
+                betas_pp, r2_pp = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list)
+            else:
+                # load GLM estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+                r2_pp = soma_estimates['r2']
+
+            # append r2
+            r2.append(r2_pp[np.newaxis,...])
+            betas.append(betas_pp[np.newaxis,...])
+        r2 = np.nanmean(np.vstack(r2), axis = 0)
+        betas = np.nanmean(np.vstack(betas), axis = 0)
+
+        if len(participant_list) == 1: # if one participant
+            fig_name = op.join(self.outputdir, 'betas_vs_coord',
+                                                'sub-{sj}'.format(sj = participant_list[0]), 
+                                                fit_type, 'betas_binned_all_regressors.png')
+        else:
+            fig_name = op.join(self.outputdir, 'betas_vs_coord',
+                                                'group_mean_betas_binned_all_regressors_{l}.png'.format(l = fit_type))
+
+        # if output path doesn't exist, create it
+        os.makedirs(op.split(fig_name)[0], exist_ok = True)
+
+        # make average event file for pp, based on events file
+        events_avg = self.somaModelObj.get_avg_events(pp, keep_b_evs = keep_b_evs)
+
+        design_matrix = self.somaModelObj.make_custom_dm(events_avg, 
+                                        osf = 100, data_len_TR = nr_TRs, 
+                                        TR = self.somaModelObj.MRIObj.TR, 
+                                        hrf_params = self.somaModelObj.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                        hrf_onset = self.somaModelObj.MRIObj.params['fitting']['soma']['hrf_onset'])
+
+        ## set beta values and reg names in dict
+        ## for all relevant regions
+        region_regs_dict = {}
+        region_betas_dict = {}
+
+        # also get list of all individual regressor names of interest (might not actually use it, but good to have)
+        reg_list = []
+        for region in all_regions:
+
+            region_regs_dict[region] = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region]
+            region_betas_dict[region] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in region_regs_dict[region]]
+            region_betas_dict[region] = np.vstack(region_betas_dict[region])
+
+            reg_list += region_regs_dict[region]
+
+        # make array of weights to use in bin
+        weight_arr = r2.copy()
+        weight_arr[weight_arr<=0] = 0 # to not use negative weights
+
+        # for each roi, make plot
+        for roi2plot in roi2plot_list:
+
+            # get vertices for each hemisphere
+            roi_vertices = {}
+            roi_coords = {}
+
+            for hemi in ['LH', 'RH']:
+                
+                roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                    roi_list = all_rois[roi2plot],
+                                                    hemi = hemi)
+
+                ## get FS coordinates for each ROI vertex
+                roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                                                                                        y_coord_surf[roi_vertices[hemi]])), 
+                                                                    fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
+                                                                    roi_name = roi2plot+'_'+hemi)
+
+            # make figure
+            # row is hemisphere, columns regressor
+            fig, axs = plt.subplots(1, len(hemi_labels), sharey=True, figsize=(18,8))
+
+            for hi, hemi in enumerate(hemi_labels):
+
+                # make y bins
+                ybins = np.linspace(np.min(roi_coords[hemi][1]), 
+                                    np.max(roi_coords[hemi][1]), n_bins+1, endpoint=False)
+                
+                # for each regressor, get median beta val for each bin
+                betas_binned_arr = []
+                for region in all_regions:
+                    for ind in np.arange(region_betas_dict[region].shape[0]):
+
+                        betas_reg_bin = []
+                        for b_ind in np.arange(len(ybins)):
+
+                            if b_ind == len(ybins) - 1:
+                                vert_bin = np.where(((roi_coords[hemi][1] >= ybins[b_ind:][0])))[0]
+                            else:
+                                vert_bin = np.where(((roi_coords[hemi][1] >= ybins[b_ind:b_ind+2][0]) & \
+                                                    (roi_coords[hemi][1] < ybins[b_ind:b_ind+2][1])))[0]
+
+                            if sum(weight_arr[roi_vertices[hemi]][vert_bin]) == 0:
+                                betas_reg_bin.append(0)
+                            else:
+                                betas_reg_bin.append(np.average(region_betas_dict[region][ind][roi_vertices[hemi]][vert_bin], 
+                                                            weights = weight_arr[roi_vertices[hemi]][vert_bin]))
+
+                        betas_binned_arr.append(np.flip(betas_reg_bin)) # to then show with right orientation
+                
+                sc = axs[hi].imshow(np.vstack(betas_binned_arr).T, #interpolation = 'spline36',
+                                        extent=[-.5,len(reg_list)-.5,
+                                                np.min(roi_coords[hemi][1]), np.max(roi_coords[hemi][1])],
+                                        aspect='auto', cmap = 'RdBu_r', vmin = -1, vmax = 1) #vmin = -1.7, vmax = 1.7)
+                axs[hi].set_xticks(range(len(reg_list)))
+                axs[hi].set_xticklabels(reg_list, rotation=90, fontsize=15)
+                axs[hi].set_ylabel('y coordinates (a.u.)', fontsize=20, labelpad=10)
+                axs[hi].set_title('Left Hemisphere', fontsize=20) if hemi == 'LH' else axs[hi].set_title('Right Hemisphere', fontsize=20)
+            fig.colorbar(sc)
+
+            fig.savefig(fig_name.replace('.png', '_{roi_name}.png'.format(roi_name = roi2plot)), 
+                                dpi=100,bbox_inches = 'tight')
+
+
+
+
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
                                     n_bins = 256, plot_cuttout = False, custom_dm = True, keep_b_evs = False):
 

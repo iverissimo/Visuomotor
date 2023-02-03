@@ -152,6 +152,13 @@ elif task == 'soma':
 
         plotter.plot_rsq(Visuomotor_data.sj_num, fit_type = run_type)
 
+    elif py_cmd == 'beta_y_dist':
+
+        plotter.plot_betas_over_y(Visuomotor_data.sj_num, fit_type = run_type,
+                                keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'],
+                                roi2plot_list = ['M1', 'S1'], n_bins = 150,
+                                all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'])
+
     elif py_cmd == 'show_click':
 
         plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name, 
