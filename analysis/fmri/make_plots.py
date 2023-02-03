@@ -148,6 +148,9 @@ elif task == 'soma':
             plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm, fit_type = run_type,
                                         keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
+    elif py_cmd == 'rsq':
+
+        plotter.plot_rsq(Visuomotor_data.sj_num, fit_type = run_type)
 
     elif py_cmd == 'show_click':
 

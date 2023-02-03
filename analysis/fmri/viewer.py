@@ -691,8 +691,79 @@ class somaViewer:
             os.makedirs(fig_pth, exist_ok = True)
 
             print('saving %s' %fig_abs_name)
-            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=True,
-                                        with_colorbar=False,with_curvature=True,with_sulci=True)
+            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=False,with_colorbar=True,
+                                                with_curvature=True,with_sulci=True,with_labels=False,
+                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+    def plot_rsq(self, participant_list, fit_type = 'loo_run', 
+                                all_rois = {'M1': ['4'], 'S1': ['3a', '3b', '1', '2'],
+                                            'S2': ['OP1'],'SMA': ['6mp', '6ma', 'SCEF'],
+                                            'sPMC': ['6d', '6a'],'iPMC': ['6v', '6r']}):
+                                            
+        """
+        plot flatmap of data (1D)
+        with R2 estimates for subject (or group)
+        will also plot flatmaps for rois of interest
+        """
+
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
+        ## get surface x and y coordinates
+        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+                                                                        merge = True)
+
+        # loop over participant list
+        r2_all = []
+        for pp in participant_list:
+            
+            ## LOAD R2
+            if fit_type == 'loo_run':
+                # get list with gii files
+                gii_filenames = self.somaModelObj.get_soma_file_list(pp, 
+                                                    file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
+                # get all run lists
+                run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+
+                ## get average beta values (all used in GLM)
+                _, r2 = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list)
+            else:
+                # load GLM estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+                r2 = soma_estimates['r2']
+
+            # append r2
+            r2_all.append(r2[np.newaxis,...])
+        r2_all = np.nanmean(np.vstack(r2_all), axis = 0)
+
+        ## plot flatmap whole suface
+
+        if len(participant_list) == 1: # if one participant
+            fig_name = op.join(self.outputdir, 'glm_r2',
+                                                'sub-{sj}'.format(sj = participant_list[0]), 
+                                                fit_type, 'r2_flatmap.png')
+        else:
+            fig_name = op.join(self.outputdir, 'glm_r2',
+                                                'group_mean_r2_flatmap_{l}.png'.format(l = fit_type))
+
+        self.plot_flatmap(r2_all, np.arange(r2_all.shape[0]), 
+                                vmin = 0, vmax = .6, cmap='hot', fig_abs_name = fig_name)
+
+        ## plot flatmap for each region
+        for region in all_rois.keys():
+            
+            # get roi vertices for BH
+            roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                    roi_list = all_rois[region],
+                                                    hemi = 'BH')
+            
+            self.plot_flatmap(r2_all, roi_vertices_BH, 
+                                    vmin = 0, vmax = .6, cmap='hot', 
+                                    fig_abs_name = fig_name.replace('.png', '_{r}.png'.format(r=region))) 
 
 
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
