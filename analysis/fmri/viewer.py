@@ -2,6 +2,7 @@ import numpy as np
 import os
 import os.path as op
 import matplotlib.pyplot as plt
+import matplotlib
 import pandas as pd
 import seaborn as sns
 import yaml
@@ -10,10 +11,12 @@ import ptitprince as pt # raincloud plots
 import matplotlib.patches as mpatches
 from  matplotlib.ticker import FuncFormatter
 
-from visuomotor_utils import normalize, add_alpha2colormap, make_raw_vertex_image, make_colormap
+from visuomotor_utils import normalize, add_alpha2colormap, make_raw_vertex_image, make_colormap, COM
 
 import cortex
 import click_viewer
+
+import scipy
 
 class somaViewer:
 
@@ -922,6 +925,299 @@ class somaViewer:
             fig.savefig(fig_name.replace('.png', '_{roi_name}.png'.format(roi_name = roi2plot)), 
                                 dpi=100,bbox_inches = 'tight')
 
+    def plot_COM_over_y(self, participant, fit_type = 'loo_run', keep_b_evs = True,
+                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 15,
+                                all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
+                                'BA43': ['43', 'OP4'], 'S2': ['OP1'],
+            'Insula': ['52', 'PI', 'Ig', 'PoI1', 'PoI2', 'FOP2', 'FOP3','MI', 'AVI', 'AAIC']
+            }):
+                                            
+        """
+        plot scatter plot and binned average of COM values over y axis,
+        for each regressor of interest
+        and for selected ROIs
+        """
+        # hemisphere labels
+        hemi_labels = ['LH', 'RH']
+        # z-score threshold for region localizer 
+        z_threshold = 3.1
+
+        # make costum colormap for face
+        colormap = ['navy','forestgreen','darkorange','purple']
+
+        cvals  = np.arange(len(colormap))
+        norm = plt.Normalize(min(cvals),max(cvals))
+        tuples = list(zip(map(norm,cvals), colormap))
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", tuples)
+
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
+        ## get surface x and y coordinates
+        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+                                                                        merge = True)
+            
+        ## LOAD R2
+        if fit_type == 'loo_run':
+            # get list with gii files
+            gii_filenames = self.somaModelObj.get_soma_file_list(participant, 
+                                                file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
+            # get all run lists
+            run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+
+            ## get average beta values (all used in GLM)
+            betas, r2 = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
+                                                        weighted_avg = True, runs2load = run_loo_list)
+
+            # path where Region contrasts were stored
+            stats_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_stats', 
+                                                    'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+
+            ## get gross region localizer areas (from contrasts)
+            region_mask = {}
+            region_mask['upper_limb'] = np.load(op.join(stats_dir, 'fixed_effects_T_upper_limb_contrast.npy'), 
+                                                allow_pickle=True)
+            region_mask['upper_limb'][region_mask['upper_limb'] < z_threshold] = np.nan
+            region_mask['face'] = np.load(op.join(stats_dir, 'fixed_effects_T_face_contrast.npy'), 
+                                                allow_pickle=True)
+            region_mask['face'][region_mask['face'] < z_threshold] = np.nan
+            
+            ## get positive and relevant r2
+            r2_mask = np.zeros(r2.shape)
+            r2_mask[r2 >=0] = 1
+        else:
+            # load GLM estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                            'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()
+            r2 = soma_estimates['r2']
+
+        # set fig name
+        fig_name = op.join(self.outputdir, 'COM_vs_coord',
+                                            'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'COM.png')
+
+        # if output path doesn't exist, create it
+        os.makedirs(op.split(fig_name)[0], exist_ok = True)
+
+        # make average event file for pp, based on events file
+        events_avg = self.somaModelObj.get_avg_events(participant, keep_b_evs = keep_b_evs)
+
+        design_matrix = self.somaModelObj.make_custom_dm(events_avg, 
+                                        osf = 100, data_len_TR = nr_TRs, 
+                                        TR = self.somaModelObj.MRIObj.TR, 
+                                        hrf_params = self.somaModelObj.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                        hrf_onset = self.somaModelObj.MRIObj.params['fitting']['soma']['hrf_onset'])
+
+        ## set beta values and reg names in dict
+        ## for all relevant regions
+        region_regs_dict = {}
+        region_betas_dict = {}
+
+        # also get list of all individual regressor names of interest (might not actually use it, but good to have)
+        reg_list = []
+        for region in all_regions:
+
+            region_regs_dict[region] = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region]
+            region_betas_dict[region] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in region_regs_dict[region]]
+            region_betas_dict[region] = np.vstack(region_betas_dict[region])
+
+            reg_list += region_regs_dict[region]
+    
+        ## use CS as major axis for ROI coordinate rotation
+        roi_ref = 'CS'
+        ref_theta = {}
+        ref_roi_vert = {}
+        for hemi in hemi_labels:
+            ref_roi_vert[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                roi_list = all_rois[roi_ref],
+                                                hemi = hemi)
+            ref_theta[hemi] = self.somaModelObj.get_rotation_angle(np.vstack((x_coord_surf[ref_roi_vert[hemi]], 
+                                                                y_coord_surf[ref_roi_vert[hemi]])))
+
+        # for each roi, make plot
+        for roi2plot in roi2plot_list:
+
+            # get vertices for each hemisphere
+            roi_vertices = {}
+            roi_coords = {}
+            for hemi in hemi_labels:
+                roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                    roi_list = all_rois[roi2plot],
+                                                    hemi = hemi)
+                ## get FS coordinates for each ROI vertex
+                roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                                                                                        y_coord_surf[roi_vertices[hemi]])), 
+                                                                    fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
+                                                                    theta = ref_theta[hemi],
+                                                                    roi_name = roi2plot+'_'+hemi)
+                ## fixed effects mask * positive CV-r2
+                mask_bool = ((~np.isnan(region_mask['upper_limb'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+                
+                ### FOR LEFT HEMISPHERE, plot COM for appropriate hand
+                if hemi == 'LH' :
+                    ##### plot figure - scatter
+                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
+
+                    region = 'right_hand'
+                    axs[0].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
+                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
+                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
+                    axs[0].set_ylim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+                    axs[0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[0].set_title('Right Hand', fontsize=20)
+
+                    region = 'both_hand'
+                    axs[1].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
+                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
+                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
+                    axs[1].set_ylim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+                    axs[1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[1].set_title('Both Hand', fontsize=20)
+                    fig.savefig(fig_name.replace('.png', '_scatter_hands_LH_{roi_name}.png'.format(roi_name = roi2plot)), 
+                                dpi=100,bbox_inches = 'tight')
+
+                    ##### plot figure - binned
+                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
+
+                    region = 'right_hand'
+                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
+                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                        statistic=lambda y: np.nanmean(y), 
+                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
+                    axs[0].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
+                    axs[0].set_xlim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+                    axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[0].set_title('Right Hand', fontsize=20)
+
+                    region = 'both_hand'
+                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
+                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                        statistic=lambda y: np.nanmean(y), 
+                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
+                    axs[1].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
+                    axs[1].set_xlim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+                    axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[1].set_title('Both Hand', fontsize=20)
+                    fig.savefig(fig_name.replace('.png', '_binned_hands_LH_{roi_name}.png'.format(roi_name = roi2plot)), 
+                                dpi=100,bbox_inches = 'tight')
+
+                ### FOR RIGHT HEMISPHERE, plot COM for appropriate hand
+                else:     
+                    ##### plot figure - scatter
+                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
+
+                    region = 'left_hand'
+                    axs[0].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
+                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
+                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
+                    axs[0].set_ylim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+                    axs[0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[0].set_title('Left Hand', fontsize=20)
+
+                    region = 'both_hand'
+                    axs[1].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
+                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
+                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
+                    axs[1].set_ylim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+                    axs[1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[1].set_title('Both Hand', fontsize=20)
+                    fig.savefig(fig_name.replace('.png', '_scatter_hands_RH_{roi_name}.png'.format(roi_name = roi2plot)), 
+                                dpi=100,bbox_inches = 'tight')
+
+                    ##### plot figure - binned
+                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
+
+                    region = 'left_hand'
+                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
+                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                        statistic=lambda y: np.nanmean(y), 
+                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
+                    axs[0].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
+                    axs[0].set_xlim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+                    axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[0].set_title('Left Hand', fontsize=20)
+
+                    region = 'both_hand'
+                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
+                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                        statistic=lambda y: np.nanmean(y), 
+                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
+                    axs[1].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
+                    axs[1].set_xlim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+                    axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[1].set_title('Both Hand', fontsize=20)
+                    fig.savefig(fig_name.replace('.png', '_binned_hands_RH_{roi_name}.png'.format(roi_name = roi2plot)), 
+                                dpi=100,bbox_inches = 'tight')
+
+            ### FOR FACE - BOTH HEMISPHERES
+
+            ##### plot figure - scatter
+            fig, axs = plt.subplots(1, 2, figsize=(12,4))
+
+            region = 'face'
+            hemi = 'LH'
+            ## fixed effects mask * positive CV-r2
+            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+            axs[0].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
+                        roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
+                    c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] , cmap = cmap)
+            axs[0].set_ylim(-50,0) #axs[0].set_ylim(-20,15)
+            axs[0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+            axs[0].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+            axs[0].set_title('Face Left Hemisphere', fontsize=20)
+
+            hemi = 'RH'
+            ## fixed effects mask * positive CV-r2
+            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+            axs[1].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
+                        roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
+                    c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], cmap = cmap)
+            axs[1].set_ylim(-50,0) #axs[0].set_ylim(-20,15)
+            axs[1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+            axs[1].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+            axs[1].set_title('Face Right Hemisphere', fontsize=20)
+            fig.savefig(fig_name.replace('.png', '_scatter_face_{roi_name}.png'.format(roi_name = roi2plot)), 
+                        dpi=100,bbox_inches = 'tight')
+
+            ##### plot figure - binned
+            fig, axs = plt.subplots(1, 2, figsize=(12,4))
+
+            hemi = 'LH'
+            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+            binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
+                                                COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                statistic=lambda y: np.nanmean(y), 
+                                                bins=np.linspace(-50, 0, n_bins+1, endpoint=False))[:2]
+            axs[0].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = cmap)
+            axs[0].set_xlim(-50,0) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+            axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+            axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+            axs[0].set_title('Face Left Hemisphere', fontsize=20)
+
+            hemi = 'RH'
+            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+            binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
+                                                COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                statistic=lambda y: np.nanmean(y), 
+                                                bins=np.linspace(-50, 0, n_bins+1, endpoint=False))[:2]
+            axs[1].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = cmap)
+            axs[1].set_xlim(-50,0) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+            axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+            axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+            axs[1].set_title('Face Right Hemisphere', fontsize=20)
+            fig.savefig(fig_name.replace('.png', '_binned_face_{roi_name}.png'.format(roi_name = roi2plot)), 
+                        dpi=100,bbox_inches = 'tight')
 
 
 
