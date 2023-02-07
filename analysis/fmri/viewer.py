@@ -696,7 +696,7 @@ class somaViewer:
                                                 curvature_brightness = 0.4, curvature_contrast = 0.1)
 
     def plot_rsq(self, participant_list, fit_type = 'loo_run', 
-                                all_rois = {'M1': ['4'], 'S1': ['3a', '3b', '1', '2'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'], #['3a', '3b', '1', '2'],
                                             'S2': ['OP1'],'SMA': ['6mp', '6ma', 'SCEF'],
                                             'sPMC': ['6d', '6a'],'iPMC': ['6v', '6r']}):
                                             
@@ -983,6 +983,9 @@ class somaViewer:
 
         sides_list = ['L', 'R'] if keep_b_evs == False else ['L', 'R', 'B']
 
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
         ## load COM values and plot
         if region == 'face':
 
@@ -995,7 +998,6 @@ class somaViewer:
             col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
                                                                 bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
             print('created costum colormap %s'%col2D_name)
-            
             
             # vertex for face vs all others
             flatmap = cortex.Vertex2D(COM_region, 
@@ -1013,6 +1015,32 @@ class somaViewer:
             _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
                                                 with_curvature=True,with_sulci=True,with_labels=False,
                                                 curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+            ## save same plot but for a few glasser ROIs
+            for region, region_label in {'M1': ['4'], 'S1': ['3b']}.items():
+                
+                # get roi vertices for BH
+                roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                        roi_list = region_label,
+                                                        hemi = 'BH')
+                
+                region_com_arr = np.zeros(COM_region.shape[0]); region_com_arr[:] = np.nan
+                region_com_arr[roi_vertices_BH] = COM_region[roi_vertices_BH]
+
+                # vertex for face vs all others
+                flatmap = cortex.Vertex2D(region_com_arr, 
+                                        region_mask_alpha,
+                                        subject = self.pysub,
+                                        vmin=0, vmax=3,
+                                        vmin2 = 0, vmax2 = 1,
+                                        cmap = col2D_name)
+                
+                filename = op.join(fig_pth, 'COM_flatmap_region-face_{r}.png'.format(r = region))
+                print('saving %s' %filename)
+                _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
+                                                    with_curvature=True,with_sulci=True,with_labels=False,
+                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+                
 
             if plot_cuttout:
                 # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
@@ -1071,6 +1099,31 @@ class somaViewer:
                 _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
                                                     with_curvature=True,with_sulci=True,with_labels=False,
                                                     curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+                ## save same plot but for a few glasser ROIs
+                for region, region_label in {'M1': ['4'], 'S1': ['3b']}.items():
+                    
+                    # get roi vertices for BH
+                    roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                            roi_list = region_label,
+                                                            hemi = 'BH')
+                    
+                    region_com_arr = np.zeros(COM_region.shape[0]); region_com_arr[:] = np.nan
+                    region_com_arr[roi_vertices_BH] = COM_region[roi_vertices_BH]
+
+                    # vertex for face vs all others
+                    flatmap = cortex.Vertex2D(region_com_arr, 
+                                            region_mask_alpha,
+                                            subject = self.pysub,
+                                            vmin=0, vmax=4,
+                                            vmin2 = 0, vmax2 = 1,
+                                            cmap = col2D_name)
+                    
+                    filename = op.join(fig_pth, 'COM_flatmap_region-upper_limb_{s}hand_{r}.png'.format(s=side,r = region))
+                    print('saving %s' %filename)
+                    _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
+                                                        with_curvature=True,with_sulci=True,with_labels=False,
+                                                        curvature_brightness = 0.4, curvature_contrast = 0.1)
 
                 if plot_cuttout:
                     # Name of a sub-layer of the 'cutouts' layer in overlays.svg file

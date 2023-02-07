@@ -385,7 +385,7 @@ class somaModel:
 
         return np.array(roi_vert)
 
-    def transform_roi_coords(self, orig_coords, fig_pth = None, roi_name = ''):
+    def transform_roi_coords(self, orig_coords, fig_pth = None, roi_name = '', theta = None):
 
         """
         Use PCA to rotate x,y ROI coordinates along major axis (usually y)
@@ -413,7 +413,10 @@ class somaModel:
         x_v2, y_v2 = evecs[:, sort_indices[1]]
 
         # rotate
-        theta = np.arctan((x_v1)/(y_v1))  
+        if theta is None:
+            theta = np.arctan((x_v1)/(y_v1))  
+        else:
+            print('using input theta value')
         rotation_mat = np.matrix([[np.cos(theta), -np.sin(theta)],
                                     [np.sin(theta), np.cos(theta)]])
         transformed_mat = rotation_mat * roi_coord_zeromean
@@ -455,6 +458,37 @@ class somaModel:
 
         return roi_coord_transformed
 
+    def get_rotation_angle(self, orig_coords):
+
+        """
+        given x,y coordinates, use PCA to find major axis (usually y),
+        and get theta angle value, that is used to build rotation matrix
+
+        Note - Assumes we are providing ROI coordinates from 1 hemisphere only
+        
+        Parameters
+        ----------
+        orig_coords: arr
+            x,y coordinate array for ROI [2, vertex]
+        """
+
+        ## center the coordinates (to have zero mean)
+        roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
+                                        orig_coords[1] - np.mean(orig_coords[1])))
+
+        ## get covariance matrix and eigen vector and values
+        cov = np.cov(roi_coord_zeromean)
+        evals, evecs = np.linalg.eig(cov)
+
+        # Sort eigenvalues in decreasing order
+        sort_indices = np.argsort(evals)[::-1]
+        x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
+        x_v2, y_v2 = evecs[:, sort_indices[1]]
+
+        # rotate
+        theta = np.arctan((x_v1)/(y_v1))  
+        return theta
+
     def get_fs_coords(self, pysub = 'fsaverage', merge = True):
 
         """
@@ -465,10 +499,15 @@ class somaModel:
         # Such a mesh is defined by a list of vertices (each vertex is given by its x,y,z coords) 
         # and a list of faces (each face is given by three vertex indices)
 
-        #left, right = cortex.db.get_surf(params['processing']['space'], 'flat', merge=False)
-        pts, polys = cortex.db.get_surf(pysub, 'flat', merge=True)
+        if merge:
+            pts, polys = cortex.db.get_surf(pysub, 'flat', merge=True)
 
-        return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
+            return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
+        else:
+            left, right = cortex.db.get_surf(pysub, 'flat', merge=False)
+
+            return {'LH': [left[0][:,0], left[0][:,1], left[0][:,2]],
+                    'RH': [right[0][:,0], right[0][:,1], right[0][:,2]]} # [vertex, axis] --> x, y, z
 
     def get_avg_events(self, participant, keep_b_evs = False):
 
