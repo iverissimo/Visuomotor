@@ -14,10 +14,7 @@ from nilearn.glm.first_level.hemodynamic_models import spm_hrf, spm_time_derivat
 
 import datetime
 
-from glmsingle.glmsingle import GLM_single
-from glmsingle.ols.make_poly_matrix import make_polynomial_matrix, make_projection_matrix
-
-from visuomotor_utils import leave_one_out, split_half_comb, correlate_arrs, COM
+from visuomotor_utils import leave_one_out, COM
 
 import scipy
 
@@ -900,10 +897,6 @@ class GLM_Model(somaModel):
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
-        # get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
-
         ## Load data
         # get list with gii files
         gii_filenames = self.get_soma_file_list(participant, 
@@ -1624,7 +1617,6 @@ class somaRF_Model(somaModel):
 
         return np.exp(-((x-mu)**2)/(2*sigma**2))
     
-    
     def create_grid_predictions(self, grid_centers, grid_sizes, reg_names = []):
 
         """ 
@@ -1651,12 +1643,11 @@ class somaRF_Model(somaModel):
 
         return grid_rfs # [nr_betas, nr predictions] 
 
-
     def find_best_pred(self, pred_arr, data_tc):
 
         """ 
-            computes best-fit rsq and slope for vertex 
-            (assumes baseline is 0)
+        computes best-fit rsq and slope for vertex 
+        (assumes baseline is 0)
 
         Parameters
         ----------
@@ -1683,7 +1674,6 @@ class somaRF_Model(somaModel):
 
         return best_pred_ind, slope, r2
 
-
     def get_grid_params(self, grid_predictions, betas_vert):
 
         """
@@ -1704,7 +1694,6 @@ class somaRF_Model(somaModel):
                     'slope': slope,
                     'r2': r2}
 
-    
     def fit_betas(self, betas, regressor_names = [], region2fit = None, nr_grid = 100, n_jobs = 8):
 
         """
@@ -1746,7 +1735,6 @@ class somaRF_Model(somaModel):
 
         return results
 
-
     def fit_data(self, participant, somaModelObj = None, betas_model = 'glm',
                                     fit_type = 'mean_run', nr_grid = 100, n_jobs = 16,
                                     region_keys = ['face', 'right_hand', 'left_hand'], nr_TRs = 141,
@@ -1758,7 +1746,23 @@ class somaRF_Model(somaModel):
         Parameters
         ----------
         participant: str
-            participant ID           
+            participant ID   
+        somaModelObj : soma Model object
+            object from one of the classes defined in soma_model  
+        betas_model: str
+            name of the model
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out) 
+        nr_grid: int
+            resolution of grid fit   
+        n_jobs: int
+            number of jobs to use in parallel fitting
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)    
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False) 
         """
 
         ## make new out dir, depeding on our HRF approach
@@ -1768,11 +1772,9 @@ class somaRF_Model(somaModel):
 
         # if leave one out, get average of CV betas
         if fit_type == 'loo_run':
-            # get list with gii files
-            gii_filenames = somaModelObj.get_soma_file_list(participant, 
-                                                file_ext = self.MRIObj.params['fitting']['soma']['extension'])
             # get all run lists
-            run_loo_list = somaModelObj.get_run_list(gii_filenames)
+            run_loo_list = somaModelObj.get_run_list(somaModelObj.get_soma_file_list(participant, 
+                                                file_ext = self.MRIObj.params['fitting']['soma']['extension']))
 
             ## get average beta values 
             betas, _ = somaModelObj.average_betas(participant, fit_type = fit_type, 
@@ -1784,30 +1786,10 @@ class somaRF_Model(somaModel):
                                             allow_pickle=True).item()
             betas = soma_estimates['betas']
 
-        # make average event file for pp, based on events file
-        events_avg = somaModelObj.get_avg_events(participant, keep_b_evs = keep_b_evs)
-
-        if custom_dm: # if we want to make the dm 
-
-            # and design matrix
-            design_matrix = somaModelObj.make_custom_dm(events_avg, 
-                                                        osf = 100, data_len_TR = nr_TRs, 
-                                                        TR = self.MRIObj.TR, 
-                                                        hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
-                                                        hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
-
-            hrf_model = 'custom'
-
-        else: # if we want to use nilearn function
-
-            # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(nr_TRs))
-
-            # Create the design matrix, hrf model containing Glover model 
-            design_matrix = make_first_level_design_matrix(frame_times,
-                                                        events = events_avg,
-                                                        hrf_model = hrf_model
-                                                        )
+        ## Get DM
+        design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
+                                                custom_dm = custom_dm, nTRs = nr_TRs, 
+                                                hrf_model = hrf_model)
 
         # fit RF model per region
         for region in region_keys:
@@ -1829,7 +1811,6 @@ class somaRF_Model(somaModel):
         np.save(op.join(out_dir, 'betas_glm.npy'), betas)
         design_matrix.to_csv(op.join(out_dir, 'DM.csv'), index=False)
 
-    
     def return_prediction(self, mu = None, size = None, slope = None, nr_points = 4):
 
         """
@@ -1838,6 +1819,26 @@ class somaRF_Model(somaModel):
 
         return self.gauss1D_cart(np.arange(nr_points), mu = mu, sigma = size) * slope
 
+    def get_RF_COM(self, mu_arr = [], size_arr = [], slope_arr = [], nr_points = 4):
+
+        """
+        Helper function to get 
+        receptive field center of mass
+
+        Parameters
+        ----------
+        mu_arr: array
+            RF center values
+        size_arr: array
+            RF size values
+        slope_arr: array
+            RF slope values
+        nr_points: int
+            number of points in RF
+        """
+        com_arr = [scipy.ndimage.measurements.center_of_mass(self.return_prediction(mu = mu_arr[i], 
+                               size = size_arr[i], slope = slope_arr[i], nr_points = nr_points))[0] for i in np.arange(mu_arr.shape[0])]
+        return np.array(com_arr)
 
     def load_estimates(self, participant, betas_model = 'glm', fit_type = 'mean_run',
                             region_keys = ['face', 'right_hand', 'left_hand', 'both_hand']):
