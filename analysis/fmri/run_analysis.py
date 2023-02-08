@@ -10,7 +10,7 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
     params = yaml.safe_load(f_in)
 
 from preproc_mridata import MRIData
-from soma_model import GLMsingle_Model, GLM_Model, somaRF_Model
+from soma_model import GLM_Model, somaRF_Model
 from prf_model import prfModel
 
 # defined command line options
@@ -127,6 +127,7 @@ if task in ['pRF', 'prf']:
     # load data model
     data_model = prfModel(Visuomotor_data)
 
+    # call command
     if py_cmd == 'fit_prf':
 
         # if we want to fit HRF params
@@ -143,83 +144,58 @@ if task in ['pRF', 'prf']:
                                 model2fit = model2fit, outdir = None, save_estimates = True,
                                 xtol = 1e-3, ftol = 1e-4, n_jobs = n_jobs)
 
+# motor task analysis
 elif task == 'soma':
 
-    # if standard GLM model or RF model that uses GLM betas
-    if (model2fit == 'glm') or \
-        ((model2fit == 'somaRF') and (Visuomotor_data.params['fitting']['soma']['somaRF']['beta_model'] == 'glm')):
+    # load data model
+    data_model = GLM_Model(Visuomotor_data)
 
-        # load data model
-        data_model = GLM_Model(Visuomotor_data)
+    # if we want nilearn dm or custom 
+    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+    
+    # call command
+    if py_cmd == 'fit_glm':
+        
+        ## loop over all subjects 
+        for pp in Visuomotor_data.sj_num:
+            data_model.fit_data(pp, fit_type = run_type, custom_dm = custom_dm, 
+                                    keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
-        # if we want nilearn dm or custom 
-        custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+    elif py_cmd == 'stats_glm':
 
-        if py_cmd == 'fit_glm':
-            
-            ## loop over all subjects 
-            for pp in Visuomotor_data.sj_num:
-                data_model.fit_data(pp, fit_type = run_type, custom_dm = custom_dm, 
-                                        keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
+        ## loop over all subjects 
+        for pp in Visuomotor_data.sj_num:
+            data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
+                                            custom_dm = custom_dm, fit_type = run_type,
+                                            keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
-        elif py_cmd == 'stats_glm':
+    elif py_cmd == 'fixed_effects':
+        
+        ## loop over all subjects 
+        for pp in Visuomotor_data.sj_num:
+            data_model.fixed_effects_contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
+                                                        custom_dm = custom_dm, fit_type = run_type,
+                                                        keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
-            ## loop over all subjects 
-            for pp in Visuomotor_data.sj_num:
-                data_model.contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
-                                                custom_dm = custom_dm, fit_type = run_type,
-                                                keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
+    elif py_cmd == 'fit_RF':
 
-        elif py_cmd == 'fixed_effects':
-            
-            ## loop over all subjects 
-            for pp in Visuomotor_data.sj_num:
-                data_model.fixed_effects_contrast_regions(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'],
-                                                            custom_dm = custom_dm, fit_type = run_type,
-                                                            keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
+        ## make RF model object
+        data_RFmodel = somaRF_Model(Visuomotor_data)
 
-        elif py_cmd == 'fit_RF':
+        if Visuomotor_data.params['fitting']['soma']['keep_b_evs']:
+            keep_b_evs = True
+            region_keys = ['face', 'right_hand', 'left_hand', 'both_hand']
+        else:
+            keep_b_evs = False
+            region_keys = ['face', 'right_hand', 'left_hand']
 
-            ## make RF model object
-            data_RFmodel = somaRF_Model(Visuomotor_data)
+        ## loop over all subjects 
+        for pp in Visuomotor_data.sj_num:
+            data_RFmodel.fit_data(pp, somaModelObj = data_model, betas_model = 'glm',
+                                    fit_type = run_type, nr_grid = 100, n_jobs = n_jobs,
+                                    region_keys = region_keys, keep_b_evs = keep_b_evs,
+                                    custom_dm = custom_dm)
 
-            if Visuomotor_data.params['fitting']['soma']['keep_b_evs']:
-                keep_b_evs = True
-                region_keys = ['face', 'right_hand', 'left_hand', 'both_hand']
-            else:
-                keep_b_evs = False
-                region_keys = ['face', 'right_hand', 'left_hand']
-
-            ## loop over all subjects 
-            for pp in Visuomotor_data.sj_num:
-                data_RFmodel.fit_data(pp, somaModelObj = data_model, betas_model = 'glm',
-                                        fit_type = run_type, nr_grid = 100, n_jobs = n_jobs,
-                                        region_keys = region_keys, keep_b_evs = keep_b_evs,
-                                        custom_dm = custom_dm)
-
-
-    # if standard GLM model or RF model that uses GLM betas
-    elif (model2fit == 'glmsingle') or \
-        ((model2fit == 'somaRF') and (Visuomotor_data.params['fitting']['soma']['somaRF']['beta_model'] == 'glmsingle')):
-
-        # load data model
-        data_model = GLMsingle_Model(Visuomotor_data)
-
-        if py_cmd == 'fit_glmsingle':
-
-            ## loop over all subjects 
-            for pp in Visuomotor_data.sj_num:
-                data_model.fit_data(pp)
-
-        elif py_cmd == 'stats_glmsingle':
-             
-            ## loop over all subjects 
-            for pp in Visuomotor_data.sj_num:
-                data_model.compute_roi_stats(pp, z_threshold = Visuomotor_data.params['fitting']['soma']['z_threshold'])
-
-        elif py_cmd == 'fit_RF':
-
-            print('Not implemented')
 
 
 

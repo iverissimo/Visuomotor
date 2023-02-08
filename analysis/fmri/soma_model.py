@@ -51,8 +51,6 @@ class somaModel:
         # if output dir not defined, then make it in derivatives
         self.outputdir = outputdir
 
-        ### some relevant params ###
-
         # processed file extension
         self.proc_file_ext = self.MRIObj.params['fitting']['soma']['extension']
 
@@ -73,6 +71,8 @@ class somaModel:
         ----------
         participant: str
             participant ID
+        file_ext: str
+            bold file extension identifier 
         """
 
         ## get list of possible input paths
@@ -96,7 +96,7 @@ class somaModel:
         """
         return np.unique([int(re.findall(r'run-\d{1,3}', op.split(input_name)[-1])[0][4:]) for input_name in file_list])
     
-    def load_data4fitting(self, file_list):
+    def load_data4fitting(self, file_list, average = False):
 
         """
         Helper function to load data for fitting
@@ -105,14 +105,14 @@ class somaModel:
         ----------
         file_list: list
             list with file names
+        average: bool
+            if we return average across files or all runs stacked
         """
 
         # get run IDs
         run_num_list = self.get_run_list(file_list)
 
         ## load data of all runs
-        # will be [runs, vertex, TR]
-
         all_data = []
         for run_id in run_num_list:
             
@@ -123,9 +123,13 @@ class somaModel:
                 print('loading %s' %hemi_file)    
                 run_data.append(np.array(surface.load_surf_data(hemi_file)))
                 
-            all_data.append(np.vstack(run_data)) # will be (vertex, TR)
+            all_data.append(np.vstack(run_data)) 
 
-        return all_data
+        # if we want to average 
+        if average:
+            return np.nanmean(all_data, axis = 0) # [vertex, TR]
+        else:
+            return all_data # [runs, vertex, TR]
 
     def set_contrast(self, dm_col, tasks, contrast_val = [1], num_cond = 1):
     
@@ -211,7 +215,7 @@ class somaModel:
         Parameters
         ----------
         betas : arr
-            array of bata values
+            array of beta values
         contrast: arr/list
             contrast vector       
         sse: float
@@ -251,7 +255,7 @@ class somaModel:
         Parameters
         ----------
         betas : arr
-            array of bata values
+            array of beta values
         contrast: arr/list
             contrast vector       
         sse: float
@@ -389,7 +393,7 @@ class somaModel:
 
         """
         Use PCA to rotate x,y ROI coordinates along major axis (usually y)
-        Note - Assumes we are providing ROI from 1 hemisphere only
+        NOTE - Assumes we are providing ROI from 1 hemisphere only
         
         Parameters
         ----------
@@ -397,6 +401,10 @@ class somaModel:
             x,y coordinate array for ROI [2, vertex]
         fig_pth: str
             if provided, will plot some sanity check plots and save in absolute dir
+        roi_name: str
+            roi name, used when fig_pth is not None
+        theta: float
+            rotation angle, if None will calculate relative to major component axis
         """
 
         ## center the coordinates (to have zero mean)
@@ -458,41 +466,61 @@ class somaModel:
 
         return roi_coord_transformed
 
-    def get_rotation_angle(self, orig_coords):
+    def get_rotation_angle(self, roi_df, roi_list = []):
 
         """
-        given x,y coordinates, use PCA to find major axis (usually y),
+        given a reference ROI, use PCA to find major axis (usually y),
         and get theta angle value, that is used to build rotation matrix
-
-        Note - Assumes we are providing ROI coordinates from 1 hemisphere only
         
         Parameters
         ----------
-        orig_coords: arr
-            x,y coordinate array for ROI [2, vertex]
+        roi_df: pd DataFrame
+            dataframe with all ROIs names, hemispheres and vertices
+        roi_list: list
+            list of strings with ROI labels to load
         """
+        ## get surface x and y coordinates, for each hemisphere
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = self.MRIObj.params['processing']['space'], 
+                                                                merge = True)
 
-        ## center the coordinates (to have zero mean)
-        roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
-                                        orig_coords[1] - np.mean(orig_coords[1])))
+        ref_theta = {}
+        for hemi in ['LH', 'RH']:
+            # get vertex indices for selected ROI and hemisphere
+            ref_roi_vert = self.get_roi_vert(roi_df, roi_list = roi_list, hemi = hemi)
 
-        ## get covariance matrix and eigen vector and values
-        cov = np.cov(roi_coord_zeromean)
-        evals, evecs = np.linalg.eig(cov)
+            # x,y coordinate array for ROI [2, vertex]
+            orig_coords = np.vstack((x_coord_surf[ref_roi_vert], 
+                                      y_coord_surf[ref_roi_vert]))
 
-        # Sort eigenvalues in decreasing order
-        sort_indices = np.argsort(evals)[::-1]
-        x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
-        x_v2, y_v2 = evecs[:, sort_indices[1]]
+            ## center the coordinates (to have zero mean)
+            roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
+                                            orig_coords[1] - np.mean(orig_coords[1])))
 
-        # rotate
-        theta = np.arctan((x_v1)/(y_v1))  
-        return theta
+            ## get covariance matrix and eigen vector and values
+            cov = np.cov(roi_coord_zeromean)
+            evals, evecs = np.linalg.eig(cov)
+
+            # Sort eigenvalues in decreasing order
+            sort_indices = np.argsort(evals)[::-1]
+            x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
+            x_v2, y_v2 = evecs[:, sort_indices[1]]
+
+            # calculate theta
+            ref_theta[hemi] = np.arctan((x_v1)/(y_v1))  
+
+        return ref_theta
 
     def get_fs_coords(self, pysub = 'fsaverage', merge = True):
 
         """
         get freesurfer surface mesh coordinates
+
+        Parameters
+        ----------
+        pysub: str
+            pycortex sub name
+        merge: bool
+            if we are merging both hemispheres, and hence getting coordinates for both combined or separate
         """
 
         ## FreeSurfer surface file format: Contains a brain surface mesh in a binary format
@@ -516,7 +544,9 @@ class somaModel:
         Parameters
         ----------
         participant: str
-            participant ID           
+            participant ID 
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)           
         """
 
         events_list = [run for run in glob.glob(op.join(self.MRIObj.sourcedata_pth,
@@ -562,8 +592,8 @@ class somaModel:
     def create_hrf_tc(self, hrf_params=[1.0, 1.0, 0.0], osf = 1, onset = 0):
         
         """
+        construct single or multiple HRFs - taken from prfpy   
 
-        construct single or multiple HRFs - taken from prfpy     
         Parameters
         ----------
         hrf_params : TYPE, optional
@@ -681,23 +711,75 @@ class GLM_Model(somaModel):
         else:
             self.outputdir = outputdir
 
+    def load_design_matrix(self, participant, keep_b_evs = True, custom_dm = True, osf = 100, nTRs = 141, hrf_model = 'glover'):
+
+        """
+        Load participant design matrix
+        
+        Parameters
+        ----------
+        participant : str
+            participant ID
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands) 
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        osf: int
+            oversampling factor for when custom_DM = True
+        nTRs: int
+            number of TRs in data run
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False)        
+        """
+
+        # get average event DataFrame for participant, based on events file
+        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
+
+        # make DM based on specific HRF params
+        if custom_dm:
+            design_matrix = self.make_custom_dm(events_avg, 
+                                                osf = osf, data_len_TR = nTRs, 
+                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
+                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
+        # or use nilearn HRF model
+        else:
+            design_matrix = make_first_level_design_matrix(self.MRIObj.TR * (np.arange(nTRs)),
+                                                        events = events_avg,
+                                                        hrf_model = hrf_model
+                                                        ) 
+        return design_matrix
 
     def make_custom_dm(self, events_df, osf = 100, data_len_TR = 141, 
-                            TR = 1.6, hrf_params = [1,1,0], hrf_onset = 0):
+                            hrf_params = [1,1,0], hrf_onset = 0):
 
         """
         Helper function to make custom dm, 
         from custom HRF
+
+        Parameters
+        ----------
+        events_df: DataFrame
+            events dataframe
+        osf: int
+            oversampling factor for when custom_DM = True
+        data_len_TR: int
+            number of TRs in data run
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False)  
+        hrf_params: list
+            HRF params to use when creating HRF
+        hrf_onset: float
+            hrf onset, in TR
         """
 
         # list with regressor names
         regressor_names = events_df.trial_type.unique()
 
         # task duration in seconds
-        task_dur_sec = data_len_TR * TR 
+        task_dur_sec = data_len_TR * self.MRIObj.TR 
 
         # hrf timecourse in sec * TR !!
-        hrf_tc = self.create_hrf_tc(hrf_params=hrf_params, osf = osf * TR, onset = hrf_onset)
+        hrf_tc = self.create_hrf_tc(hrf_params=hrf_params, osf = osf * self.MRIObj.TR, onset = hrf_onset)
 
         all_regs_dict = {}
 
@@ -718,7 +800,9 @@ class GLM_Model(somaModel):
                                                     pad_length = 20 * osf)
 
             # and resample back to TR 
-            reg_resampled = self.resample_arr(reg_pred_osf_conv[0], osf = osf, final_sf = TR)/(osf) # dividing by osf so amplitude scaling not massive (but irrelevante because a.u.)
+            reg_resampled = self.resample_arr(reg_pred_osf_conv[0], 
+                                                osf = osf, 
+                                                final_sf = self.MRIObj.TR)/(osf) # dividing by osf so amplitude scaling not massive (but irrelevante because a.u.)
             
             all_regs_dict[reg_name] = reg_resampled
             
@@ -728,7 +812,6 @@ class GLM_Model(somaModel):
         dm_df = pd.DataFrame.from_dict(all_regs_dict)
 
         return dm_df
-
 
     def fit_glm_tc(self, voxel, dm):
     
@@ -741,7 +824,6 @@ class GLM_Model(somaModel):
             timeseries of a single voxel
         dm : arr
             DM array (#TR,#regressors)
-                
         """
 
         if np.isnan(voxel).any():
@@ -759,12 +841,19 @@ class GLM_Model(somaModel):
         
         return prediction, betas, r2, mse
 
-
     def get_region_keys(self, reg_keys = ['face', 'upper_limb', 'lower_limb'], keep_b_evs = False):
 
         """
-        Helper function to get region key dictionary
-        usefull to make general region contrasts 
+        Helper function to get gross motor region 
+        key dictionary 
+        (usefull to make general region contrasts)
+
+        Parameters
+        ----------
+        reg_keys : list
+            list with strings, listing name of gross regions to contrast
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands) 
         """
 
         region_regs = {}
@@ -778,7 +867,6 @@ class GLM_Model(somaModel):
             
         return region_regs
 
-
     def contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'mean_run',
                                             z_threshold = 3.1, pval_1sided = True, keep_b_evs = False,
                                             reg_keys = ['face', 'upper_limb', 'lower_limb']):
@@ -791,7 +879,19 @@ class GLM_Model(somaModel):
         Parameters
         ----------
         participant: str
-            participant ID           
+            participant ID  
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)   
+        reg_keys : list
+            list with strings, listing name of gross regions to contrast
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)    
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False) 
+        z_threshold: float
+            z-score threshold
         """
 
         ## make new out dir, depeding on our HRF approach
@@ -804,49 +904,31 @@ class GLM_Model(somaModel):
         gii_filenames = self.get_soma_file_list(participant, 
                                             file_ext = self.MRIObj.params['fitting']['soma']['extension'])
 
-        if fit_type == 'mean_run':
-            # load and average data of all runs
-            all_data = self.load_data4fitting(gii_filenames)
-            data2fit = np.nanmean(all_data, axis = 0)[np.newaxis,...] # [runs, vertex, TR]
-        
+        ## Load data
+        # get list with gii files
+        gii_filenames = self.get_soma_file_list(participant, 
+                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+
+        if fit_type == 'mean_run':         
+            # load data of all runs and average
+            data2fit = self.load_data4fitting(gii_filenames, average = True)[np.newaxis,...] # [1, vertex, TR]
+
         elif fit_type == 'loo_run':
             # get all run lists
             run_loo_list = self.get_run_list(gii_filenames)
 
             # leave one run out, load others and average
             data2fit = []
-
             for lo_run_key in run_loo_list:
                 print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
-
-                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file])
-                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
-            
+                data2fit.append(self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file], 
+                                                        average = True)[np.newaxis,...])
             data2fit = np.vstack(data2fit) # [runs, vertex, TR]
-        
-        # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
-        
-        # make DM
-        if custom_dm: # if we want to make the dm 
 
-            design_matrix = self.make_custom_dm(events_avg, 
-                                                osf = 100, data_len_TR = data2fit.shape[-1], 
-                                                TR = self.MRIObj.TR, 
-                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
-                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
-            hrf_model = 'custom'
-
-        else: # if we want to use nilearn function
-
-            # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
-
-            # Create the design matrix, hrf model containing Glover model 
-            design_matrix = make_first_level_design_matrix(frame_times,
-                                                        events = events_avg,
-                                                        hrf_model = hrf_model
-                                                        )
+        ## Get DM
+        design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
+                                                custom_dm = custom_dm, nTRs = data2fit.shape[-1], 
+                                                hrf_model = hrf_model)
 
         ## get stats for all runs
         for rind, avg_data in enumerate(data2fit): # [vertex, TR]
@@ -914,7 +996,6 @@ class GLM_Model(somaModel):
                 np.save(stats_filename, soma_stats_dict)
 
                 ## now do rest of the contrasts within region (if lateralized) ###
-
                 if region != 'face':
 
                     # compare left and right
@@ -959,7 +1040,6 @@ class GLM_Model(somaModel):
                     
                     np.save(LR_stats_filename, LR_stats_dict)
 
-    
     def fixed_effects_contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'loo_run',
                                             z_threshold = 3.1, pval_1sided = True, keep_b_evs = False,
                                             reg_keys = ['face', 'upper_limb', 'lower_limb']):
@@ -973,7 +1053,19 @@ class GLM_Model(somaModel):
         Parameters
         ----------
         participant: str
-            participant ID           
+            participant ID  
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)   
+        reg_keys : list
+            list with strings, listing name of gross regions to contrast
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)    
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False) 
+        z_threshold: float
+            z-score threshold          
         """
 
         ## make new out dir, depeding on our HRF approach
@@ -990,43 +1082,21 @@ class GLM_Model(somaModel):
             # get all run lists
             run_loo_list = self.get_run_list(gii_filenames)
 
-            # load left out run
+            # leave one run out, load others and average
             data2fit = []
-
             for lo_run_key in run_loo_list:
-                print('Loading left out run-{r}'.format(r = str(lo_run_key).zfill(2)))
-
-                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) in file])
-                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
-            
+                print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
+                data2fit.append(self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file], 
+                                                        average = True)[np.newaxis,...])
             data2fit = np.vstack(data2fit) # [runs, vertex, TR]
 
         elif fit_type == 'all_run':
             raise ValueError('Would load and make fix effects for each individual run fit. Not implemented yet')
 
-        # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
-        
-        # make DM
-        if custom_dm: # if we want to make the dm 
-
-            design_matrix = self.make_custom_dm(events_avg, 
-                                                osf = 100, data_len_TR = data2fit.shape[-1], 
-                                                TR = self.MRIObj.TR, 
-                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
-                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
-            hrf_model = 'custom'
-
-        else: # if we want to use nilearn function
-
-            # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
-
-            # Create the design matrix, hrf model containing Glover model 
-            design_matrix = make_first_level_design_matrix(frame_times,
-                                                        events = events_avg,
-                                                        hrf_model = hrf_model
-                                                        )
+        ## Get DM
+        design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
+                                                custom_dm = custom_dm, nTRs = data2fit.shape[-1], 
+                                                hrf_model = hrf_model)
 
         ## calculate contrast effects for all runs
         all_runs_effects = {'face': {'effect_size': [], 'effect_variance': []},
@@ -1159,28 +1229,40 @@ class GLM_Model(somaModel):
             filename = op.join(out_dir, 'fixed_effects_T_{kn}_contrast.npy'.format(kn = key_name))
             np.save(filename, fixed_effects_T[0])
 
-
     def average_betas(self, participant, fit_type = 'loo_run', weighted_avg = True, runs2load = [1,2,3,4]):
 
         """
-        Helper function to load and average betas 
+        Helper function to load and average beta values
         from several runs
+
+        Parameters
+        ----------
+        participant: str
+            participant ID    
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        weighted_avg: bool
+            if we want to average weighted by r2
+        runs2load: list
+            list with number ID for runs to load
         """
 
-        # loop over runs
         all_betas = []
         all_r2 = []
         weight_arr = []
 
+        # loop over runs
         for run_key in runs2load: 
             
             ## load estimates, and get betas and prediction
             soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                            fit_type, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_key).zfill(2))), 
+                                            fit_type, 'estimates_{ft}-{ri}.npy'.format(ft = fit_type,
+                                                                                    ri = str(run_key).zfill(2))), 
                                             allow_pickle=True).item()
 
             # append beta values
             all_betas.append(soma_estimates['betas'][np.newaxis,...])
+            
             # append r2/CV-r2
             if fit_type == 'loo_run':
                 tmp_arr = soma_estimates['cv_r2'].copy()
@@ -1196,23 +1278,19 @@ class GLM_Model(somaModel):
         all_r2 = np.vstack(all_r2) #[runs, vertex]
         weight_arr = np.vstack(weight_arr) #[runs, vertex]
 
-        if weighted_avg:
-            # calculate weighted average for each beta regressor
+        # calculate weighted average for each beta regressor
+        if weighted_avg: 
             avg_betas = []
-
             for ind in np.arange(all_betas.shape[-1]):
-                
                 avg_betas.append(np.ma.average(all_betas[...,ind], axis=0, weights=weight_arr))
-                
-            avg_betas = np.stack(avg_betas, axis = -1)
+            avg_betas = np.stack(avg_betas, axis = -1).data
         else:
             avg_betas = np.nanmean(all_betas, axis = 0)
         
         avg_r2 = np.nanmean(all_r2, axis = 0)
 
-        return avg_betas.data, avg_r2
+        return avg_betas, avg_r2
 
-    
     def fit_data(self, participant, fit_type = 'mean_run', hrf_model = 'glover', 
                                     custom_dm = True, keep_b_evs = False):
 
@@ -1221,7 +1299,15 @@ class GLM_Model(somaModel):
         Parameters
         ----------
         participant: str
-            participant ID           
+            participant ID    
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands) 
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM   
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False)     
         """
 
         print('running GLM...')
@@ -1234,16 +1320,14 @@ class GLM_Model(somaModel):
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
+        ## Load data
         # get list with gii files
         gii_filenames = self.get_soma_file_list(participant, 
                                             file_ext = self.MRIObj.params['fitting']['soma']['extension'])
 
         if fit_type == 'mean_run':         
-            # load data of all runs
-            all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
-
-            # average runs
-            data2fit = np.nanmean(all_data, axis = 0)[np.newaxis,...]
+            # load data of all runs and average
+            data2fit = self.load_data4fitting(gii_filenames, average = True)[np.newaxis,...] # [1, vertex, TR]
 
         elif fit_type == 'loo_run':
             # get all run lists
@@ -1251,53 +1335,35 @@ class GLM_Model(somaModel):
 
             # leave one run out, load others and average
             data2fit = []
-
             for lo_run_key in run_loo_list:
                 print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
+                data2fit.append(self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file], 
+                                                        average = True)[np.newaxis,...])
+            data2fit = np.vstack(data2fit) # [runs, vertex, TR]
 
-                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file])
-                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
-            
-            data2fit = np.vstack(data2fit)
-
-        # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
-
-        if custom_dm: # if we want to make the dm 
-
-            design_matrix = self.make_custom_dm(events_avg, 
-                                                osf = 100, data_len_TR = data2fit.shape[-1], 
-                                                TR = self.MRIObj.TR, 
-                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
-                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
-            hrf_model = 'custom'
-
-        else: # if we want to use nilearn function
-
-            # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(data2fit.shape[-1]))
-
-            # Create the design matrix, hrf model containing Glover model 
-            design_matrix = make_first_level_design_matrix(frame_times,
-                                                        events = events_avg,
-                                                        hrf_model = hrf_model
-                                                        )
+        ## Get DM
+        design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
+                                                custom_dm = custom_dm, nTRs = data2fit.shape[-1], 
+                                                hrf_model = hrf_model)
 
         # plot design matrix and save just to check if everything fine
         plot = plot_design_matrix(design_matrix)
         fig = plot.get_figure()
+        hrf_model = 'custom' if custom_dm else hrf_model
         fig.savefig(op.join(out_dir,'design_matrix_HRF-%s.png'%hrf_model), dpi=100,bbox_inches = 'tight')
 
-        ## fit glm for all vertices
+        ## Fit glm for all vertices
         for rind, data in enumerate(data2fit):
             
             print('Fitting GLM')
 
+            # set filename to save estimates
             if fit_type == 'mean_run':      
                 estimates_filename = op.join(out_dir, 'estimates_run-mean.npy')
             elif fit_type == 'loo_run':
                 estimates_filename = op.join(out_dir, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2)))
 
+            ## actually fit
             soma_params = Parallel(n_jobs=16)(delayed(self.fit_glm_tc)(vert, design_matrix.values) for _,vert in enumerate(data))
 
             estimates_dict = {}
@@ -1310,8 +1376,9 @@ class GLM_Model(somaModel):
             if fit_type == 'loo_run':
 
                 # load left out data
-                other_run_data = np.nanmean(self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[rind]).zfill(2)) in file]), axis = 0)
+                other_run_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[rind]).zfill(2)) in file], average = True)
                 
+                # get CV-r2
                 estimates_dict['cv_r2'] = np.nan_to_num(1-np.sum((other_run_data - estimates_dict['prediction'])**2, axis=-1)/(other_run_data.shape[-1]*other_run_data.var(-1)))
 
             # save estimates dict
@@ -1333,7 +1400,21 @@ class GLM_Model(somaModel):
         Parameters
         ----------
         participant: str
-            participant ID           
+            participant ID 
+        region: str
+            region name 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out) 
+        fixed_effects: bool
+            if we want to use fixed effects across runs  
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)    
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False) 
+        z_threshold: float
+            z-score threshold            
         """
 
         # if we want to used loo betas, and fixed effects t-stat
@@ -1375,88 +1456,27 @@ class GLM_Model(somaModel):
                                             allow_pickle=True).item()['betas']
 
         # load z-score localizer area, for region movements
-        if region == 'face':
-            if (fit_type == 'loo_run') and (fixed_effects == True): 
-                z_score_region = np.load(op.join(stats_dir, 'fixed_effects_T_{r}_contrast.npy'.format(r=region)), 
-                                    allow_pickle=True)
-            else:
-                z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
-                                    allow_pickle=True).item()['z_score']
+        region_mask = self.load_zmask(region = region, filepth = stats_dir, fit_type = fit_type, 
+                                    fixed_effects = fixed_effects, z_threshold = z_threshold, keep_b_evs = keep_b_evs)
 
-            # mask for relevant vertices
-            region_mask = z_score_region.copy(); 
-            region_mask[z_score_region < z_threshold] = np.nan
-        else:
-            if (fit_type == 'loo_run') and (fixed_effects == True): 
-                z_score_region = np.load(op.join(stats_dir, 'fixed_effects_T_{r}_RvsL_contrast.npy'.format(r=region)), 
-                                    allow_pickle=True)
-            else:
-                # we are going to look at left and right individually, so there are 2 region masks
-                z_score_region = np.load(op.join(stats_dir, 'stats_{r}_RvsL_contrast.npy'.format(r=region)), 
-                                        allow_pickle=True).item()['z_score']
+        ## Get DM
+        design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
+                                                custom_dm = custom_dm, nTRs = nr_TRs, 
+                                                hrf_model = hrf_model)
 
-            region_mask = {}
-            region_mask['R'] = z_score_region.copy()
-            region_mask['R'][z_score_region < 0] = np.nan
-            region_mask['L'] = z_score_region.copy()
-            region_mask['L'][z_score_region > 0] = np.nan
-
-            if keep_b_evs: # if we are looking at both hands/legs
-                if (fit_type == 'loo_run') and (fixed_effects == True): 
-                    z_score_region = np.load(op.join(stats_dir, 'fixed_effects_T_{r}_contrast.npy'.format(r=region)), 
-                                        allow_pickle=True)
-                else:
-                    z_score_region = np.load(op.join(stats_dir, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
-                                        allow_pickle=True).item()['z_score']
-
-                region_mask['B'] = z_score_region.copy()
-                region_mask['B'][z_score_region < z_threshold] = np.nan
-
-        # make average event file for pp, based on events file
-        events_avg = self.get_avg_events(participant, keep_b_evs = keep_b_evs)
-
-        if custom_dm: # if we want to make the dm 
-
-            design_matrix = self.make_custom_dm(events_avg, 
-                                                osf = 100, data_len_TR = nr_TRs, 
-                                                TR = self.MRIObj.TR, 
-                                                hrf_params = self.MRIObj.params['fitting']['soma']['hrf_params'], 
-                                                hrf_onset = self.MRIObj.params['fitting']['soma']['hrf_onset'])
-            hrf_model = 'custom'
-
-        else: # if we want to use nilearn function
-
-            # specifying the timing of fMRI frames
-            frame_times = self.MRIObj.TR * (np.arange(nr_TRs))
-
-            # Create the design matrix, hrf model containing Glover model 
-            design_matrix = make_first_level_design_matrix(frame_times,
-                                                        events = events_avg,
-                                                        hrf_model = hrf_model
-                                                        )
         ## get beta values for region 
         # and z mask
         if region == 'face':
-            region_regs = self.MRIObj.params['fitting']['soma']['all_contrasts'][region]
-            region_betas = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in region_regs]
-            region_betas = np.vstack(region_betas)
-
+            region_betas = self.get_region_betas(betas, region = 'face', dm = design_matrix)
         elif region == 'upper_limb':
-
             region_betas = {}
-            region_betas['R'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['right_hand']]
-            region_betas['R'] = np.vstack(region_betas['R'])
-
-            region_betas['L'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['left_hand']]
-            region_betas['L'] = np.vstack(region_betas['L'])
-
+            region_betas['R'] = self.get_region_betas(betas, region = 'right_hand', dm = design_matrix)
+            region_betas['L'] = self.get_region_betas(betas, region = 'left_hand', dm = design_matrix)
             if keep_b_evs: # if we are looking at both hands
-                region_betas['B'] = [betas[..., np.where((design_matrix.columns == reg))[0][0]] for reg in self.MRIObj.params['fitting']['soma']['all_contrasts']['both_hand']]
-                region_betas['B'] = np.vstack(region_betas['B'])
+                region_betas['B'] = self.get_region_betas(betas, region = 'both_hand', dm = design_matrix)
         
         # calculate COM for all vertices
         if isinstance(region_betas, dict):
-            
             for side in region_betas.keys():
                 COM_all = COM(region_betas[side])
             
@@ -1475,824 +1495,88 @@ class GLM_Model(somaModel):
             np.save(op.join(out_dir, 'COM_reg-{r}.npy'.format(r = region)), COM_surface)
             np.save(op.join(out_dir, 'zmask_reg-{r}.npy'.format(r = region)), region_mask)
 
+    def get_region_betas(self, betas, region = 'face', dm = None):
 
-
-class GLMsingle_Model(somaModel):
-
-    def __init__(self, MRIObj, outputdir = None):
-        
-        """__init__
-        constructor for class 
+        """ Helper function to subselect betas for a given region identifier
         
         Parameters
         ----------
-        MRIObj : MRIData object
-            object from one of the classes defined in processing.load_exp_data
-        outputdir: str or None
-            path to general output directory            
-        """
-
-        # need to initialize parent class (Model), indicating output infos
-        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
-
-        # if output dir not defined, then make it in derivatives
-        if outputdir is None:
-            self.outputdir = op.join(self.MRIObj.derivatives_pth, 'glmsingle_fits')
-        else:
-            self.outputdir = outputdir
-
-        # some options to feed into glm single
-        self.glm_single_ops = self.MRIObj.params['fitting']['soma']['glm_single_ops']
-
-    
-    def get_dm_glmsing(self, nr_TRs = 141, nr_runs = 1, sing_trial = False):
-
-        """
-        make glmsingle DM for all runs
-        
-        Parameters
-        ----------
-        nr_TRs: int
-            number of TRs in run  
-        sing_trial: bool
-            if we want a dm of unique conditions or of single trial events        
-        """
-
-        ## get trial timings, in TR
-        # initial baseline period - NOTE!! rounding up, will compensate by shifting hrf onset
-        start_baseline_dur = int(np.round(self.MRIObj.soma_event_time_in_sec['empty']/self.MRIObj.TR)) 
-        
-        # trial duration (including ITIs)
-        trial_dur = sum([self.MRIObj.soma_event_time_in_sec[name] for name in self.MRIObj.soma_trial_order])/self.MRIObj.TR
-
-        if sing_trial == True:
-            ## define DM [TR, conditions]
-            # initialize at 0
-            design_array = np.zeros((nr_TRs, len(self.soma_stim_labels)))
-
-            # fill it with ones on stim onset
-            for t, trl_cond in enumerate(self.soma_stim_labels):
-                
-                # fill it 
-                design_array[int(start_baseline_dur + t*trial_dur), t] = 1
-                #print(int(start_baseline_dur + t*trial_dur))
-
-        else:
-            ## define DM [TR, conditions]
-            # initialize at 0
-            design_array = np.zeros((nr_TRs, len(self.soma_cond_unique)))
-
-            # fill it with ones on stim onset
-            for t, trl_cond in enumerate(self.soma_stim_labels):
-                
-                # index for condition column
-                cond_ind = np.where(self.soma_cond_unique == trl_cond)[0][0]
-                
-                # fill it 
-                design_array[int(start_baseline_dur + t*trial_dur), cond_ind] = 1
-                #print(int(start_baseline_dur + t*trial_dur))
-            
-        # and stack it for each run
-        all_dm = []
-        for r in np.arange(nr_runs):
-            all_dm.append(design_array)
-
-        return all_dm
-
-    def get_dm_from_events(self, participant, nr_TRs = 141, nr_runs = 1, sing_trial = False):
-
-        """
-        get dm from events timing
-        
-        Parameters
-        ----------
-        nr_TRs: int
-            number of TRs in run  
-        sing_trial: bool
-            if we want a dm of unique conditions or of single trial events        
-        """
-        
-        # get events onset
-        events_df = self.get_avg_events(participant, keep_b_evs = True)
-        onset_TR = np.ceil(events_df.onset.values/self.MRIObj.TR).astype(int)
-
-        if sing_trial == True:
-
-            design_array = np.zeros((nr_TRs, len(self.soma_stim_labels)))
-
-            # fill it with ones on stim onset
-            for t, trl_cond in enumerate(self.soma_stim_labels):
-                
-                # fill it 
-                design_array[onset_TR[t], t] = 1
-
-        else:
-            design_array = np.zeros((nr_TRs, len(self.soma_cond_unique)))
-
-            # fill it with ones on stim onset
-            for t, trl_cond in enumerate(self.soma_stim_labels):
-                
-                # index for condition column
-                cond_ind = np.where(self.soma_cond_unique == trl_cond)[0][0]
-                
-                # fill it 
-                design_array[onset_TR[t], cond_ind] = 1
-        
-        # and stack it for each run
-        all_dm = []
-        for r in np.arange(nr_runs):
-            all_dm.append(design_array)
-
-        return all_dm
-
-    def average_betas_per_cond(self, single_trial_betas):
-
-        """
-        average obtained beta values 
-        for each condition and run
-        
-        Parameters
-        ----------
-        single_trial_betas: arr
-            single trial betas for all runs [vertex, betas*runs]         
-        """
-
-        # number of single trials
-        nr_sing_trial = len(self.soma_stim_labels)
-
-        # number of runs fitted
-        num_runs = int(single_trial_betas.shape[-1]/nr_sing_trial)
-
-        # where we store condition betas [runs, vertex, cond]
-        avg_betas_cond = np.zeros((num_runs, single_trial_betas.shape[0], len(self.soma_cond_unique)))
-
-        # iterate over runs
-        for run_ind in np.arange(num_runs): 
-
-            # beta values for run
-            betas_run = single_trial_betas[..., 
-                                            int(run_ind * nr_sing_trial):int(nr_sing_trial + run_ind * nr_sing_trial)]
-
-            # for each unique condition
-            for i, cond_name in enumerate(self.soma_cond_unique):
-
-                # find indices where condition happens in trial
-                ind_c = [ind for ind, name in enumerate(self.soma_stim_labels) if name == cond_name]
-
-                # average beta values for that condition, and store
-                avg_beta = np.mean(betas_run[..., ind_c], axis = -1)
-                avg_betas_cond[run_ind,:, i] = avg_beta
-
-        return avg_betas_cond
-
-    def get_nuisance_matrix(self, maxpolydeg, pcregressors = None, pcnum = 1, nr_TRs = 141):
-
-        """
-        construct projection matrices 
-        for the nuisance components
-        
-        Parameters
-        ----------
-        maxpolydeg: list
-            list with ints which represent 
-            polynomial degree to use for polynomial nuisance functions [runs, poly] 
-        pcregressors: list
-            list with pcregressors to add to nuisance matrix [runs, TR, nr_pcregs]
-        pcnum: int
-            number of pc regressors to actually use
-        nr_TRs: int
-            number of TRs in run
-               
-        """
-        # if we didnt add pcregressors, just make list of None
-        if pcregressors is None:
-            extra_regressors_all = [None for r in range(np.array(maxpolydeg).shape[0])] # length of nr of runs
-        else:
-            extra_regressors_all = [pcregressors[r][:, :pcnum] for r in range(np.array(maxpolydeg).shape[0])]
-
-        # construct projection matrices for the nuisance components
-        polymatrix = []
-        combinedmatrix = []
-        
-        for p in range(np.array(maxpolydeg).shape[0]): # for each run
-
-            # this projects out polynomials
-            pmatrix = make_polynomial_matrix(nr_TRs,
-                                            maxpolydeg[p])
-            polymatrix.append(make_projection_matrix(pmatrix))
-
-            extra_regressors = extra_regressors_all[p]
-
-            # this projects out both of them
-            if extra_regressors is not None:
-                if extra_regressors.any():
-                    combinedmatrix.append(
-                        make_projection_matrix(
-                            np.c_[pmatrix, extra_regressors]
-                        )
-                    )
-            else:
-                combinedmatrix.append(
-                    make_projection_matrix(pmatrix))
-
-        return polymatrix, combinedmatrix
-
-    def get_hrf_tc(self, hrf_library, hrf_index):
-
-        """
-        make hrf timecourse
-        for all surface vertex
-        
-        Parameters
-        ----------
-        hrf_library: arr
-            hrf library that was used in fit
-        hrf_index: arr
-            hrf index for each vertex  
-        """
-        hrf_surf = [hrf_library[:,ind_hrf] for ind_hrf in hrf_index]
-        return np.vstack(hrf_surf)
-
-    def get_prediction_tc(self, dm, hrf_tc, betas, psc_tc=False, combinedmatrix=None, meanvol=None):
-
-        """
-        get prediction timecourse for vertex
-        
-        Parameters
-        ----------
-        dm: arr
-            design matrix [TR, nr_cond]
-        hrf_tc: arr
-            hrf timecourse for vertex
         betas: arr
-            beta values for vertex [nr_cond]
-        psc_tc: bool
-            if we want to percent signal change predicted timecourse
-        combinedmatrix: arr
-            nuisance component matrix 
-        meanvol: float
-            mean volume for vertex
+            array with all beta values [vertex, nregs]
+        region: str
+            region name (ex: face, right_hand, etc)
+        dm: dataframe
+            design matrix 
         """
-        # convolve HRF into design matrix
-        design0 = scipy.signal.convolve2d(dm, hrf_tc[..., np.newaxis])[0:dm.shape[0],:]  
+        region_regs = self.MRIObj.params['fitting']['soma']['all_contrasts'][region]
+        region_betas = [betas[..., np.where((dm.columns == reg))[0][0]] for reg in region_regs]
+        region_betas = np.vstack(region_betas)
 
-        # predicted timecourse is design times betas from fit
-        prediction = design0 @ betas if psc_tc == True else design0 @ betas/100 * meanvol
+        return region_betas
 
-        # denoise
-        if combinedmatrix is not None:
-            prediction = combinedmatrix.astype(np.float32) @ prediction
+    def load_zmask(self, region = 'face', filepth = None, fit_type = 'loo_run', 
+                        fixed_effects = True, z_threshold = 3.1, keep_b_evs = True):
 
-        return prediction
-
-    def get_denoised_data(self, participant, maxpolydeg = [], pcregressors = None, pcnum = 1,
-                                            run_ID = None, psc_tc = False):
-
-        """
-        get denoised data 
-        (this is, taking into account nuisance regressors glsingle uses during fit)
+        """ load z score mask,
+        that delimites functional region of interest
         
         Parameters
         ----------
-        participant: str
-            participant ID  
-        maxpolydeg: list
-            list with ints which represent 
-            polynomial degree to use for polynomial nuisance functions [runs, poly] 
-        pcregressors: list
-            list with pcregressors to add to nuisance matrix [runs, TR, nr_pcregs]
-        pcnum: int
-            number of pc regressors to actually use
-        run_ID: int
-            run identifier, if we only want to load and denoise specific run
-            NOTE! in this case, expects input of pcregressors and maxpoly for that run 
-        psc_tc: bool
-            if we want to percent signal change predicted timecourse
-    
+        region: str
+            region name
+        filepth: str
+            absolute path where contrast stats are stored
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out) 
+        fixed_effects: bool
+            if we want to use fixed effects across runs  
+        z_threshold: float
+            z-score threshold   
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)         
         """
 
-        ## get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                              file_ext = 'hemi-L{ext}'.format(ext = self.MRIObj.file_ext)) + \
-                        self.get_soma_file_list(participant, 
-                                    file_ext = 'hemi-R{ext}'.format(ext = self.MRIObj.file_ext))
-        
-        ## if we want a specific run, filter
-        if run_ID is not None:
-            gii_filenames = [file for file in gii_filenames if 'run-{r}'.format(r = str(run_ID).zfill(2)) in file]
-
-        ## load data of all runs
-        all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
-
-        ## get run ID list for bookeeping
-        self.run_list = self.get_run_list(gii_filenames)
-
-        ## get nuisance matrix
-        # if we want PSC data, then dont remove intercept (mean vol)
-        # if psc_tc == True:
-        #     maxpolydeg = [[val for val in r_list if val != 0] for r_list in maxpolydeg]
-
-        combinedmatrix = self.get_nuisance_matrix(maxpolydeg,
-                                                pcregressors = pcregressors,
-                                                pcnum = pcnum,
-                                                nr_TRs = np.array(all_data).shape[-1])[-1]
-        ## denoise data
-        data_out = [] 
-        for r, cm in enumerate(combinedmatrix):
-
-            data_denoised = cm.astype(np.float32) @ np.transpose(all_data[r])
-
-            if psc_tc == True:
-                mean_signal = all_data[r].mean(axis = -1)[np.newaxis, ...] #data_denoised.mean(axis = 0)[np.newaxis, ...]
-                data_psc = data_denoised/np.absolute(mean_signal) #(data_denoised - mean_signal)/np.absolute(mean_signal)
-                data_psc *= 100
-                data_out.append(data_psc) 
+        # load z-score localizer area, for region movements
+        if region == 'face':
+            if (fit_type == 'loo_run') and (fixed_effects == True): 
+                z_score_region = np.load(op.join(filepth, 'fixed_effects_T_{r}_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True)
             else:
-                data_out.append(data_denoised) 
+                z_score_region = np.load(op.join(filepth, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True).item()['z_score']
 
-        return data_out
-
-    def fit_data(self, participant):
-
-        """ fit glm single model to participant data
-        
-        Parameters
-        ----------
-        participant: str
-            participant ID           
-        """
-
-        # get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                              file_ext = 'hemi-L{ext}'.format(ext = self.MRIObj.file_ext)) + \
-                        self.get_soma_file_list(participant, 
-                                    file_ext = 'hemi-R{ext}'.format(ext = self.MRIObj.file_ext))
-
-        # load data of all runs
-        all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
-        
-        # make design matrix
-        all_dm = self.get_dm_from_events(participant, 
-                                        nr_TRs = np.array(all_data).shape[-1], 
-                                        nr_runs = len(self.get_run_list(gii_filenames)))
-
-        ## make new out dir, depeding on our HRF approach
-        out_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                            'hrf_{h}'.format(h = self.glm_single_ops['hrf']))
-        # if output path doesn't exist, create it
-        os.makedirs(out_dir, exist_ok = True)
-
-        ## make binary mask to exclude relevant voxels from noisepool
-        binary_mask = self.make_correlation_mask(np.array(all_data), percentile_thresh = 99)
-
-        ## create a directory for saving GLMsingle outputs
-        opt = dict()
-
-        # set important fields 
-        if self.glm_single_ops['hrf'] in ['canonical', 'average']: # turn hrf fitting off
-            opt['wantlibrary'] = 0
+            # mask for relevant vertices
+            region_mask = z_score_region.copy(); 
+            region_mask[z_score_region < z_threshold] = np.nan
         else:
-            opt['wantlibrary'] = 1 # will fit hrf
-
-        if self.glm_single_ops['denoise']: # if we are denoising 
-            opt['wantglmdenoise'] = 1
-        else:
-            opt['wantglmdenoise'] = 0
-
-        if self.glm_single_ops['fracr']: # if we are doing frac ridge 
-            opt['wantfracridge'] = 1
-        else:
-            opt['wantfracridge'] = 0
-
-        # shift onset by remainder, to make start point accurate
-        opt['hrfonset'] = -(self.MRIObj.soma_event_time_in_sec['empty'] % self.MRIObj.TR) 
-
-        #opt['hrftoassume'] = hrf_final
-        opt['brainexclude'] = binary_mask.astype(int) 
-        opt['brainR2'] = 100
-
-        opt['brainthresh'] = [99, 0] # which allows all voxels to pass the intensity threshold
-
-        # limit polynomials used, to only intercept and linear slope
-        opt['maxpolydeg'] = [[0, 1] for _ in range(np.array(all_data).shape[0])]
-
-        # for the purpose of this example we will keep the relevant outputs in memory
-        # and also save them to the disk
-        opt['wantfileoutputs'] = [1,1,1,1]
-        opt['wantmemoryoutputs'] = [1,1,1,1]
-
-
-        # running python GLMsingle involves creating a GLM_single object
-        # and then running the procedure using the .fit() routine
-        glmsingle_obj = GLM_single(opt)
-
-        # visualize all the hyperparameters
-        print(glmsingle_obj.params)
-
-        print(f'running GLMsingle...')
-        
-        # get start time
-        start_time = datetime.datetime.now()
-
-        # run GLMsingle
-        results_glmsingle = glmsingle_obj.fit(
-                                            all_dm,
-                                            all_data,
-                                            self.MRIObj.soma_event_time_in_sec['stim'],
-                                            self.MRIObj.TR,
-                                            outputdir = out_dir)
-
-        # Print duration, for bookeeping
-        end_time = datetime.datetime.now()
-        print("\nStart time:\t{start_time}\nEnd time:\t{end_time}\nDuration:\t{dur}".format(
-                        start_time = start_time,
-                        end_time = end_time,
-                        dur  = end_time - start_time))
-
-        ## save opt for easy access later (and consistency)
-        print('Saving opts dict')
-        np.save(op.join(out_dir, 'OPTS.npy'), opt)
-
-        ## save some plots for sanity check ##
-
-        ## MODEL D
-        # CV-rsq
-        flatmap = cortex.Vertex(results_glmsingle['typed']['R2'], 
-                        self.MRIObj.sj_space,
-                        vmin = 0, vmax = 80, 
-                        cmap='hot')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-
-        fig_name = op.join(out_dir, 'modeltypeD_rsq.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-        # Frac value
-        flatmap = cortex.Vertex(results_glmsingle['typed']['FRACvalue'], 
-                        self.MRIObj.sj_space,
-                        vmin = 0, vmax = 1, 
-                        cmap='copper')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-
-        fig_name = op.join(out_dir, 'modeltypeD_fracridge.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-        # Average betas 
-        flatmap = cortex.Vertex(np.mean(results_glmsingle['typed']['betasmd'], axis = -1), 
-                        self.MRIObj.sj_space,
-                        vmin = -3, vmax = 3, 
-                        cmap='RdBu_r')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-
-        fig_name = op.join(out_dir, 'modeltypeD_avgbetas.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-        # Noise pool
-        flatmap = cortex.Vertex(results_glmsingle['typed']['noisepool'], 
-                  self.MRIObj.sj_space,
-                   vmin = 0, vmax = 1, #.7,
-                   cmap='hot')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-
-        fig_name = op.join(out_dir, 'modeltypeD_noisepool.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-        ## MODEL A
-        # RSQ
-        flatmap = cortex.Vertex(results_glmsingle['typea']['onoffR2'], 
-                        self.MRIObj.sj_space,
-                        vmin = 0, vmax = 50, #.7,
-                        cmap='hot')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-
-        fig_name = op.join(out_dir, 'modeltypeA_ONOFF_rsq.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-        # Betas
-        flatmap = cortex.Vertex(results_glmsingle['typea']['betasmd'][...,0], 
-                        self.MRIObj.sj_space,
-                        vmin = -2, vmax = 2, 
-                        cmap='RdBu_r')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-
-        fig_name = op.join(out_dir, 'modeltypeA_ONOFF_betas.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-        # save binary mask used
-        flatmap = cortex.Vertex(binary_mask, 
-                        self.MRIObj.sj_space,
-                        vmin = 0, vmax = 1, #.7,
-                        cmap='hot')
-        #cortex.quickshow(flatmap, with_curvature=True,with_sulci=True)
-        fig_name = op.join(out_dir, 'binary_mask_corr.png')
-        print('saving %s' %fig_name)
-        _ = cortex.quickflat.make_png(fig_name, flatmap, recache=False,with_colorbar=True,with_curvature=True,with_sulci=True,with_labels=False)
-
-
-    def load_results_dict(self, participant, fits_dir = None, load_opts = False):
-
-        """ helper function to 
-        load glm single model estimates
-        
-        Parameters
-        ----------
-        participant: str
-            participant ID           
-        """
-
-        # path to estimates
-        if fits_dir is None:
-            fits_dir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                            'hrf_{h}'.format(h = self.glm_single_ops['hrf']))
-
-        ## load existing file outputs if they exist
-        results_glmsingle = dict()
-        results_glmsingle['typea'] = np.load(op.join(fits_dir,'TYPEA_ONOFF.npy'),allow_pickle=True).item()
-        results_glmsingle['typeb'] = np.load(op.join(fits_dir,'TYPEB_FITHRF.npy'),allow_pickle=True).item()
-        results_glmsingle['typec'] = np.load(op.join(fits_dir,'TYPEC_FITHRF_GLMDENOISE.npy'),allow_pickle=True).item()
-        results_glmsingle['typed'] = np.load(op.join(fits_dir,'TYPED_FITHRF_GLMDENOISE_RR.npy'),allow_pickle=True).item()
-
-        ## if we saved fit params, load them too
-        if load_opts:
-            opt = dict()
-            opt = np.load(op.join(fits_dir, 'OPTS.npy'), allow_pickle=True).item()
-            return results_glmsingle, opt
-        
-        else:
-            return results_glmsingle
-
-    def get_tc_stats(self, data_tc, betas, contrast = [], dm_run = [], hrf_tc = [], 
-                            psc_tc = False, combinedmatrix = None, meanvol = None, pval_1sided = True):
-
-        """ function to calculate the contrast statistics
-        for a specific timecourse
-        
-        Parameters
-        ----------
-        data_tc: arr
-            vertex timecourse     
-        betas: arr
-            beta values for vertex    
-        contrast: arr/list
-            contrast vector
-        dm_run: arr
-            design matrix for run [TR, cond] (not convolved)
-        hrf_tc: arr
-            hrf timecourse for vertex
-        psc_tc: bool
-            if we want to percent signal change predicted timecourse
-        combinedmatrix: arr
-            nuisance component matrix - NOTE! If we want to psc accurately, combinedmatrix should NOT have intercept
-        meanvol: float
-            mean volume for vertex
-
-        """
-
-        # convolve dm with hrf of vertex
-        dm_conv = scipy.signal.convolve2d(dm_run, hrf_tc[..., np.newaxis])[0:dm_run.shape[0],:]  
-
-        # calculate design variance
-        design_var = self.design_variance(dm_conv, contrast)
-
-        # get prediction timecourse
-        prediction = self.get_prediction_tc(dm_run, hrf_tc, betas,
-                                            psc_tc = psc_tc,
-                                            combinedmatrix = combinedmatrix,
-                                            meanvol = meanvol)
-
-        # sum of squared errors
-        sse = ((data_tc - prediction) ** 2).sum() 
-
-        # degrees of freedom = N - P = timepoints - predictores
-        df = (dm_conv.shape[0] - dm_conv.shape[1])
-
-        t_val, p_val, z_score = self.calc_contrast_stats(betas = betas, 
-                                                contrast = contrast, sse = sse, df = df, 
-                                                design_var = design_var, pval_1sided = pval_1sided)
-
-        return t_val, p_val, z_score
-
-    def compute_roi_stats(self, participant, z_threshold = 3.1):
-
-        """ 
-            compute statistics for GLM single
-            to localize general face, hand and leg region 
-            and for left vs right regions
-
-        Parameters
-        ----------
-        participant: str
-            participant ID           
-        """
-
-        # print start time, for bookeeping
-        start_time = datetime.datetime.now()
-
-        ## outdir will be fits dir, which depends on our HRF approach
-        out_dir = op.join(self.MRIObj.derivatives_pth, 'glmsingle_stats',
-                                            'sub-{sj}'.format(sj = participant), 
-                                            'hrf_{h}'.format(h = self.glm_single_ops['hrf']))
-        # if output path doesn't exist, create it
-        os.makedirs(out_dir, exist_ok = True)
-
-        ## load estimates and fitting options
-        results_glmsingle, fit_opts = self.load_results_dict(participant,
-                                                            load_opts = True)
-
-        ## Load PSC data for all runs
-        data_psc = self.get_denoised_data(participant,
-                                                maxpolydeg = fit_opts['maxpolydeg'],
-                                                pcregressors = results_glmsingle['typed']['pcregressors'],
-                                                pcnum = results_glmsingle['typed']['pcnum'],
-                                                run_ID = None,
-                                                psc_tc = True)
-
-        ## get hrf for all vertices
-        hrf_surf = self.get_hrf_tc(fit_opts['hrflibrary'], 
-                                    results_glmsingle['typed']['HRFindex'])
-
-        ## make design matrix
-        all_dm = self.get_dm_glmsing(nr_TRs = np.array(data_psc).shape[1], 
-                                   nr_runs = np.array(data_psc).shape[0])
-
-        ## get average beta per condition
-        avg_betas = self.average_betas_per_cond(results_glmsingle['typed']['betasmd'])
-
-        ## get nuisance matrix
-        combinedmatrix = self.get_nuisance_matrix(fit_opts['maxpolydeg'],
-                                               pcregressors = results_glmsingle['typed']['pcregressors'],
-                                               pcnum = results_glmsingle['typed']['pcnum'],
-                                               nr_TRs = np.array(data_psc).shape[1])[-1]
-
-        # now make simple contrasts
-        print('Computing simple contrasts')
-        print('Using z-score of %0.2f as threshold for localizer' %z_threshold)
-
-
-        reg_keys = list(self.MRIObj.params['fitting']['soma']['all_contrasts'].keys())
-        reg_keys.sort() # list of key names (of different body regions)
-
-        loo_keys = leave_one_out(reg_keys) # loo for keys 
-
-        # one broader region vs all the others
-        for index,region in enumerate(reg_keys): 
-
-            print('contrast for %s ' %region)
-
-            # list of other contrasts
-            other_contr = np.append(self.MRIObj.params['fitting']['soma']['all_contrasts'][loo_keys[index][0]],
-                                    self.MRIObj.params['fitting']['soma']['all_contrasts'][loo_keys[index][1]])
-
-            contrast = self.set_contrast(self.soma_cond_unique, 
-                                    [self.MRIObj.params['fitting']['soma']['all_contrasts'][str(region)], other_contr],
-                                [1,-len(self.MRIObj.params['fitting']['soma']['all_contrasts'][str(region)])/len(other_contr)],
-                                num_cond=2)
-
-            ## loop over runs
-            run_stats = {}
-
-            for run_ind, run_ID in enumerate(self.run_list):
-
-                # set filename
-                stats_filename = op.join(out_dir, 'stats_run-{rid}_{reg}_vs_all_contrast.npy'.format(rid = run_ID,
-                                                                                                    reg = region))
-
-                # compute contrast-related statistics
-                soma_stats = Parallel(n_jobs=16)(delayed(self.get_tc_stats)(data_psc[run_ind][..., vert], 
-                                                                        beta_vert, contrast = contrast, 
-                                                                        dm_run = all_dm[run_ind], hrf_tc = hrf_surf[vert],
-                                                                        psc_tc = True, combinedmatrix = combinedmatrix[run_ind], 
-                                                                        meanvol = results_glmsingle['typed']['meanvol'][vert], 
-                                                                        pval_1sided = True) for vert, beta_vert in enumerate(tqdm(avg_betas[run_ind])))
-                soma_stats = np.vstack(soma_stats) # t_val, p_val, zscore
-
-                run_stats[run_ID] = {}
-                run_stats[run_ID]['t_val'] = soma_stats[..., 0]
-                run_stats[run_ID]['p_val'] = soma_stats[..., 1]
-                run_stats[run_ID]['zscore'] = soma_stats[..., 2]
-
-                print('saving %s'%stats_filename)
-                np.save(stats_filename, run_stats[run_ID])
-
-            ## now do rest of the contrasts within region (if lateralized) ###
-
-            if region != 'face':
-
-                # compare left and right
-                print('Right vs Left contrasts')
-
-                if region == 'upper_limb':
-                    limbs = ['hand', self.MRIObj.params['fitting']['soma']['all_contrasts']['upper_limb']]
+            if (fit_type == 'loo_run') and (fixed_effects == True): 
+                z_score_region = np.load(op.join(filepth, 'fixed_effects_T_{r}_RvsL_contrast.npy'.format(r=region)), 
+                                    allow_pickle=True)
+            else:
+                # we are going to look at left and right individually, so there are 2 region masks
+                z_score_region = np.load(op.join(filepth, 'stats_{r}_RvsL_contrast.npy'.format(r=region)), 
+                                        allow_pickle=True).item()['z_score']
+
+            region_mask = {}
+            region_mask['R'] = z_score_region.copy()
+            region_mask['R'][z_score_region < 0] = np.nan
+            region_mask['L'] = z_score_region.copy()
+            region_mask['L'][z_score_region > 0] = np.nan
+
+            if keep_b_evs: # if we are looking at both hands/legs
+                if (fit_type == 'loo_run') and (fixed_effects == True): 
+                    z_score_region = np.load(op.join(filepth, 'fixed_effects_T_{r}_contrast.npy'.format(r=region)), 
+                                        allow_pickle=True)
                 else:
-                    limbs = ['leg', self.MRIObj.params['fitting']['soma']['all_contrasts']['lower_limb']]
-                            
-                rtask = [s for s in limbs[-1] if 'r'+limbs[0] in s]
-                ltask = [s for s in limbs[-1] if 'l'+limbs[0] in s]
-                tasks = [rtask,ltask] # list with right and left elements
-                            
-                contrast = self.set_contrast(self.soma_cond_unique,
-                                                tasks, [1, -1], num_cond=2)
+                    z_score_region = np.load(op.join(filepth, 'stats_{r}_vs_all_contrast.npy'.format(r=region)), 
+                                        allow_pickle=True).item()['z_score']
 
-                ## loop over runs
-                for run_ind, run_ID in enumerate(self.run_list):
+                region_mask['B'] = z_score_region.copy()
+                region_mask['B'][z_score_region < z_threshold] = np.nan
 
-                    # set filename
-                    stats_filename = op.join(out_dir, 'stats_run-{rid}_{reg}_RvsL_contrast.npy'.format(rid = run_ID,
-                                                                                                    reg = region))
+        return region_mask # note, for face is array, for upper_limb is dict with mask for each side (or both)
 
-                    # mask data - only significant voxels for region
-                    region_ind = np.where((run_stats[run_ID]['zscore'] >= z_threshold))[0]
 
-                    # compute contrast-related statistics
-                    LR_stats = Parallel(n_jobs=16)(delayed(self.get_tc_stats)(data_psc[run_ind][..., vert], 
-                                                                            avg_betas[run_ind][vert], contrast = contrast, 
-                                                                            dm_run = all_dm[run_ind], hrf_tc = hrf_surf[vert],
-                                                                            psc_tc = True, combinedmatrix = combinedmatrix[run_ind], 
-                                                                            meanvol = results_glmsingle['typed']['meanvol'][vert], 
-                                                                            pval_1sided = True) for vert in tqdm(region_ind))
-                    LR_stats = np.vstack(LR_stats) # t_val, p_val, zscore
-
-                    ## fill it for surface
-                    LR_soma_stats = np.zeros((run_stats[run_ID]['zscore'].shape[0], LR_stats.shape[-1]))
-                    LR_soma_stats[:] = np.nan
-                    LR_soma_stats[region_ind,:] = LR_stats
-
-                    print('saving %s'%stats_filename)
-                    np.save(stats_filename, {'t_val': LR_soma_stats[..., 0],
-                                            'p_val': LR_soma_stats[..., 1],
-                                            'zscore': LR_soma_stats[..., 2]})
-
-        # Print duration
-        end_time = datetime.datetime.now()
-        print("\nStart time:\t{start_time}\nEnd time:\t{end_time}\nDuration:\t{dur}".format(
-                        start_time = start_time,
-                        end_time = end_time,
-                        dur  = end_time - start_time))
-
-    def zscore_reg_betas(self, betas):
-
-        """
-        z-score betas per condition
-        """
-
-        zbetas = []
-
-        for i in np.arange(betas.shape[-1]): # assumes betas is [vert, regs]
-            
-            zbetas.append((betas[...,i] - np.mean(betas[...,i]))/np.std(betas[...,i]))
-
-        return np.vstack(zbetas).T
-
-    def make_correlation_mask(self, data_runs, percentile_thresh = 99, n_jobs = 8):
-
-        """
-        Calculate split-half correlation across all combinations of runs 
-        Then shuffle timecourses in time and use that null distribution to find a
-        threshold at a certain percentile
-        Will return binary mask that can be used for noise pool 
-        
-        Parameters
-        ----------
-        data_runs: arr
-            data array with all runs stacked [runs, vertex, TR]
-        percentile_thresh: int/float
-            qth percentile to use as threshold 
-        """
-
-        ## split runs in half and get unique combinations
-        run_sh_lists = split_half_comb(np.arange(data_runs.shape[0]))
-
-        # get correlation value for each combination
-        corr_arr = []
-        rnd_corr_arr = []
-
-        for r in run_sh_lists:
-            
-            ## correlate the two halfs
-            corr_arr.append(correlate_arrs(np.mean(np.array(data_runs)[list(r[0])], axis = 0), 
-                                            np.mean(np.array(data_runs)[list(r[-1])], axis = 0), 
-                                            n_jobs = n_jobs, shuffle_axis = None))
-            
-            ## correlate with randomized half
-            rnd_corr_arr.append(correlate_arrs(np.mean(np.array(data_runs)[list(r[0])], axis = 0), 
-                                            np.mean(np.array(data_runs)[list(r[-1])], axis = 0), 
-                                            n_jobs = n_jobs, shuffle_axis = -1))
-
-        # average values 
-        avg_sh_corr = np.nanmean(corr_arr, axis = 0)
-        avg_sh_rnd_corr = np.nanmean(rnd_corr_arr, axis = 0)
-
-        ## make final mask
-        # we want to exclude vertices below threshold
-        binary_mask = np.ones(avg_sh_corr.shape)
-        binary_mask[avg_sh_corr >= np.nanpercentile(avg_sh_rnd_corr, percentile_thresh)] = 0 # we want to set to 0 the ones that are not in the noise pool 
-
-        return binary_mask
 
 
 class somaRF_Model(somaModel):
