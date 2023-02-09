@@ -1,24 +1,308 @@
 import numpy as np
 import os
 import os.path as op
-import matplotlib.pyplot as plt
-import matplotlib
 import pandas as pd
-import seaborn as sns
 import yaml
 
 import ptitprince as pt # raincloud plots
+
 import matplotlib.patches as mpatches
 from  matplotlib.ticker import FuncFormatter
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import matplotlib.colors as colors
 
-from visuomotor_utils import normalize, add_alpha2colormap, make_raw_vertex_image, make_colormap, COM
+import seaborn as sns
+
+from visuomotor_utils import normalize, COM
 
 import cortex
 import click_viewer
 
 import scipy
 
-class somaViewer:
+class Viewer:
+
+    def __init__(self, pysub = 'fsaverage'):
+        
+        """__init__
+        constructor for class 
+        
+        Parameters
+        ----------
+        pysub: str
+            basename of pycortex subject folder, where we drew all ROIs. 
+        """
+
+        # pycortex subject to use
+        self.pysub = pysub
+
+        # set font type for plots globally
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['font.sans-serif'] = 'Helvetica'
+
+
+    def get_flatmaps(self, est_arr1, est_arr2 = None, 
+                            vmin1 = 0, vmax1 = .8, vmin2 = None, vmax2 = None,
+                            cmap = 'BuBkRd'):
+
+        """
+        Helper function to set and return flatmap  
+
+        Parameters
+        ----------
+        est_arr1 : array
+            data array
+        est_arr2 : array
+            data array
+        cmap : str
+            string with colormap name
+        vmin1: int/float
+            minimum value est_arr1
+        vmin2: int/float
+            minimum value est_arr2
+        vmax1: int/float 
+            maximum value est_arr1
+        vmax2: int/float 
+            maximum value est_arr2
+        """
+
+        # if two arrays provided, then fig is 2D
+        if est_arr2 is not None:
+            flatmap = cortex.Vertex2D(est_arr1, est_arr2,
+                                    self.pysub,
+                                    vmin = vmin1, vmax = vmax1,
+                                    vmin2 = vmin2, vmax2 = vmax2,
+                                    cmap = cmap)
+        else:
+            flatmap = cortex.Vertex(est_arr1, 
+                                    self.pysub,
+                                    vmin = vmin1, vmax = vmax1,
+                                    cmap = cmap)
+
+        return flatmap
+
+    def plot_flatmap(self, est_arr1, est_arr2 = None, verts = None, 
+                            vmin1 = 0, vmax1 = .8, vmin2 = None, vmax2 = None, 
+                            cmap='hot', fig_abs_name = None):
+
+        """
+        plot flatmap of data (1D)
+        with option to only show select vertices
+
+        Parameters
+        ----------
+        est_arr1 : array
+            data array
+        est_arr2 : array
+            data array
+        verts: array
+            list of vertices to select
+        cmap : str
+            string with colormap name
+        vmin1: int/float
+            minimum value est_arr1
+        vmin2: int/float
+            minimum value est_arr2
+        vmax1: int/float 
+            maximum value est_arr1
+        vmax2: int/float 
+            maximum value est_arr2
+        fig_abs_name: str
+            if provided, will save figure with this absolute name
+        """
+
+        # subselect vertices, if provided
+        if verts is not None:
+            surface_arr1 = np.zeros(est_arr1.shape[0])
+            surface_arr1[:] = np.nan
+            surface_arr1[verts] = est_arr1[verts]
+            if est_arr2 is not None:
+                surface_arr2 = np.zeros(est_arr2.shape[0])
+                surface_arr2[:] = np.nan
+                surface_arr2[verts] = est_arr2[verts]
+            else:
+                surface_arr2 = None
+        else:
+            surface_arr1 = est_arr1
+            surface_arr2 = est_arr2
+
+        flatmap = self.get_flatmaps(surface_arr1, est_arr2 = surface_arr2, 
+                            vmin1 = vmin1, vmax1 = vmax1, vmin2 = vmin2, vmax2 = vmax2,
+                            cmap = cmap)
+        
+        # if we provide absolute name for figure, then save there
+        if fig_abs_name is not None:
+
+            fig_pth = op.split(fig_abs_name)[0]
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+
+            print('saving %s' %fig_abs_name)
+            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=False,with_colorbar=True,
+                                                with_curvature=True,with_sulci=True,with_labels=False,
+                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+        else:
+            cortex.quickshow(flatmap, recache=False,with_colorbar=True,
+                                    with_curvature=True,with_sulci=True,with_labels=False,
+                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+    def make_raw_vertex_image(self, data1, cmap = 'hot', vmin = 0, vmax = 1, 
+                          data2 = [], vmin2 = 0, vmax2 = 1, subject = 'fsaverage', data2D = False):  
+    
+        """ function to fix web browser bug in pycortex
+            allows masking of data with nans
+        
+        Parameters
+        ----------
+        data1 : array
+            data array
+        cmap : str
+            string with colormap name (not the alpha version)
+        vmin: int/float
+            minimum value
+        vmax: int/float 
+            maximum value
+        subject: str
+            overlay subject name to use
+        
+        Outputs
+        -------
+        vx_fin : VertexRGB
+            vertex object to call in webgl
+        
+        """
+        
+        # Get curvature
+        curv = cortex.db.get_surfinfo(subject, type = 'curvature', recache=False)#,smooth=1)
+        # Adjust curvature contrast / color. Alternately, you could work
+        # with curv.data, maybe threshold it, and apply a color map.     
+        curv.data[curv.data>0] = .1
+        curv.data[curv.data<=0] = -.1
+        #curv.data = np.sign(curv.data.data) * .25
+        
+        curv.vmin = -1
+        curv.vmax = 1
+        curv.cmap = 'gray'
+        
+        # Create display data 
+        vx = cortex.Vertex(data1, subject, cmap = cmap, vmin = vmin, vmax = vmax)
+        
+        # Pick an arbitrary region to mask out
+        # (in your case you could use np.isnan on your data in similar fashion)
+        if data2D:
+            data2[np.isnan(data2)] = vmin2
+            norm2 = colors.Normalize(vmin2, vmax2)  
+            alpha = np.clip(norm2(data2), 0, 1)
+        else:
+            alpha = ~np.isnan(data1) #(data < 0.2) | (data > 0.4)
+        alpha = alpha.astype(np.float)
+        
+        # Map to RGB
+        vx_rgb = np.vstack([vx.raw.red.data, vx.raw.green.data, vx.raw.blue.data])
+        vx_rgb[:,alpha>0] = vx_rgb[:,alpha>0] * alpha[alpha>0]
+        
+        curv_rgb = np.vstack([curv.raw.red.data, curv.raw.green.data, curv.raw.blue.data])
+        # do this to avoid artifacts where curvature gets color of 0 valur of colormap
+        curv_rgb[:,np.where((vx_rgb > 0))[-1]] = curv_rgb[:,np.where((vx_rgb > 0))[-1]] * (1-alpha)[np.where((vx_rgb > 0))[-1]]
+
+        # Alpha mask
+        display_data = curv_rgb + vx_rgb 
+
+        # Create vertex RGB object out of R, G, B channels
+        vx_fin = cortex.VertexRGB(*display_data, subject, curvature_brightness = 0.4, curvature_contrast = 0.1)
+
+        return vx_fin
+
+    def make_colormap(self, colormap = 'rainbow_r', bins = 256, add_alpha = True, invert_alpha = False, cmap_name = 'costum',
+                      discrete = False, return_cmap = False):
+
+        """ make custom colormap
+        can add alpha channel to colormap,
+        and save to pycortex filestore
+        Parameters
+        ----------
+        colormap : str or List/arr
+            if string then has to be a matplolib existent colormap
+            if list/array then contains strings with color names, to create linear segmented cmap
+        bins : int
+            number of bins for colormap
+        invert_alpha : bool
+            if we want to invert direction of alpha channel
+            (y can be from 0 to 1 or 1 to 0)
+        cmap_name : str
+            new cmap filename, final one will have _alpha_#-bins added to it
+        discrete : bool
+            if we want a discrete colormap or not (then will be continuous)
+        Outputs
+        -------
+        rgb_fn : str
+            absolute path to new colormap
+        """
+        
+        if isinstance(colormap, str): # if input is string (so existent colormap)
+
+            # get colormap
+            cmap = cm.get_cmap(colormap)
+
+        else: # is list of strings
+            cvals  = np.arange(len(colormap))
+            norm = plt.Normalize(min(cvals),max(cvals))
+            tuples = list(zip(map(norm,cvals), colormap))
+            cmap = colors.LinearSegmentedColormap.from_list("", tuples)
+            
+            if discrete == True: # if we want a discrete colormap from list
+                cmap = colors.ListedColormap(colormap)
+                bins = int(len(colormap))
+
+        # convert into array
+        cmap_array = cmap(range(bins))
+
+        # reshape array for map
+        new_map = []
+        for i in range(cmap_array.shape[-1]):
+            new_map.append(np.tile(cmap_array[...,i],(bins,1)))
+
+        new_map = np.moveaxis(np.array(new_map), 0, -1)
+        
+        if add_alpha: 
+            # make alpha array
+            if invert_alpha == True: # in case we want to invert alpha (y from 1 to 0 instead pf 0 to 1)
+                _, alpha = np.meshgrid(np.linspace(0, 1, bins, endpoint=False), 1-np.linspace(0, 1, bins))
+            else:
+                _, alpha = np.meshgrid(np.linspace(0, 1, bins, endpoint=False), np.linspace(0, 1, bins, endpoint=False))
+
+            # add alpha channel
+            new_map[...,-1] = alpha
+            cmap_ext = (0,1,0,1)
+        else:
+            new_map = new_map[:1,...].copy() 
+            cmap_ext = (0,100,0,1)
+        
+        fig = plt.figure(figsize=(1,1))
+        ax = fig.add_axes([0,0,1,1])
+        # plot 
+        plt.imshow(new_map,
+        extent = cmap_ext,
+        origin = 'lower')
+        ax.axis('off')
+
+        if add_alpha: 
+            rgb_fn = op.join(op.split(cortex.database.default_filestore)[
+                            0], 'colormaps', cmap_name+'_alpha_bins_%d.png'%bins)
+        else:
+            rgb_fn = op.join(op.split(cortex.database.default_filestore)[
+                            0], 'colormaps', cmap_name+'_bins_%d.png'%bins)
+        #misc.imsave(rgb_fn, new_map)
+        plt.savefig(rgb_fn, dpi = 200,transparent=True)
+
+        if return_cmap:
+            return cmap
+        else:
+            return rgb_fn 
+
+class somaViewer(Viewer):
 
     def __init__(self, somaModelObj, outputdir = None, pysub = 'fsaverage'):
         
@@ -35,6 +319,9 @@ class somaViewer:
             basename of pycortex subject folder, where we drew all ROIs. 
         """
 
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(pysub = pysub)
+
         # set object to use later on
         self.somaModelObj = somaModelObj
 
@@ -43,14 +330,6 @@ class somaViewer:
             self.outputdir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots')
         else:
             self.outputdir = outputdir
-
-        # set font type for plots globally
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = 'Helvetica'
-
-        # pycortex subject to use
-        self.pysub = pysub
-
     
     def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None,
                                             fit_type = 'mean_run', keep_b_evs = False, fixed_effects = True):
@@ -118,7 +397,7 @@ class somaViewer:
 
             # create costume colormp J4
             n_bins = 256
-            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
+            col2D_name = op.splitext(op.split(self.make_colormap(colormap = ['navy','forestgreen','darkorange','purple'],
                                                                 bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
 
             click_plotter.images['face'] = cortex.Vertex2D(COM_face, 
@@ -132,7 +411,7 @@ class somaViewer:
             
             COM_RH = np.load(op.join(com_betas_dir, 'COM_reg-upper_limb_R.npy'), allow_pickle = True)
 
-            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
+            col2D_name = op.splitext(op.split(self.make_colormap(colormap = 'rainbow_r',
                                                                     bins = n_bins, 
                                                                     cmap_name = 'rainbow_r'))[-1])[0]
 
@@ -178,7 +457,7 @@ class somaViewer:
 
             # create costume colormp J4
             n_bins = 256
-            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
+            col2D_name = op.splitext(op.split(self.make_colormap(colormap = ['navy','forestgreen','darkorange','purple'],
                                                                 bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
 
             click_plotter.images['face'] = cortex.Vertex2D(face_center, 
@@ -207,7 +486,7 @@ class somaViewer:
 
             region_mask_alpha = np.array(click_plotter.RF_estimates['RH']['r2']) # use RF model R2 as mask
 
-            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
+            col2D_name = op.splitext(op.split(self.make_colormap(colormap = 'rainbow_r',
                                                                     bins = n_bins, 
                                                                     cmap_name = 'rainbow_r'))[-1])[0]
 
@@ -361,37 +640,8 @@ class somaViewer:
                                                overlays_visible=['rois','sulci']),
                             size=(1024 * 4, 768 * 4), trim=True, sleep=60)
     
-    def plot_flatmap(self, data_arr, verts, vmin = 0, vmax = 80, cmap='hot', fig_abs_name = None):
-
-        """
-        plot flatmap of data (1D)
-        only show select vertices
-        """
-
-        surface_arr = np.zeros(data_arr.shape[0])
-        surface_arr[:] = np.nan
-        surface_arr[verts] = data_arr[verts]
-
-        flatmap = cortex.Vertex(surface_arr, 
-                        self.pysub,
-                        vmin = vmin, vmax = vmax, 
-                        cmap = cmap)
-        cortex.quickshow(flatmap, with_curvature=True,with_sulci=True, with_labels=False)
-
-        # if we provide absolute name for figure, then save there
-        if fig_abs_name is not None:
-
-            fig_pth = op.split(fig_abs_name)[0]
-            # if output path doesn't exist, create it
-            os.makedirs(fig_pth, exist_ok = True)
-
-            print('saving %s' %fig_abs_name)
-            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=False,with_colorbar=True,
-                                                with_curvature=True,with_sulci=True,with_labels=False,
-                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
-
     def plot_rsq(self, participant_list, fit_type = 'loo_run', 
-                                all_rois = {'M1': ['4'], 'S1': ['3b'], #['3a', '3b', '1', '2'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'], 
                                             'S2': ['OP1'],'SMA': ['6mp', '6ma', 'SCEF'],
                                             'sPMC': ['6d', '6a'],'iPMC': ['6v', '6r']}):
                                             
@@ -399,14 +649,19 @@ class somaViewer:
         plot flatmap of data (1D)
         with R2 estimates for subject (or group)
         will also plot flatmaps for rois of interest
+
+        Parameters
+        ----------
+        participant_list: list
+            list with participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out) 
+        all_rois: dict
+            dictionary with names of ROIs and and list of glasser atlas labels
         """
 
         ## load atlas ROI df
         self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
-
-        ## get surface x and y coordinates
-        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
-                                                                        merge = True)
 
         # loop over participant list
         r2_all = []
@@ -414,11 +669,9 @@ class somaViewer:
             
             ## LOAD R2
             if fit_type == 'loo_run':
-                # get list with gii files
-                gii_filenames = self.somaModelObj.get_soma_file_list(pp, 
-                                                    file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
                 # get all run lists
-                run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+                run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(pp, 
+                                                            file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
 
                 ## get average beta values (all used in GLM)
                 _, r2 = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
@@ -436,7 +689,6 @@ class somaViewer:
         r2_all = np.nanmean(np.vstack(r2_all), axis = 0)
 
         ## plot flatmap whole suface
-
         if len(participant_list) == 1: # if one participant
             fig_name = op.join(self.outputdir, 'glm_r2',
                                                 'sub-{sj}'.format(sj = participant_list[0]), 
@@ -445,8 +697,8 @@ class somaViewer:
             fig_name = op.join(self.outputdir, 'glm_r2',
                                                 'group_mean_r2_flatmap_{l}.png'.format(l = fit_type))
 
-        self.plot_flatmap(r2_all, np.arange(r2_all.shape[0]), 
-                                vmin = 0, vmax = .6, cmap='hot', fig_abs_name = fig_name)
+        ## plot and save fig for whole surface
+        self.plot_flatmap(r2_all, vmin1 = 0, vmax1 = .6, cmap='hot', fig_abs_name = fig_name)
 
         ## plot flatmap for each region
         for region in all_rois.keys():
@@ -455,11 +707,11 @@ class somaViewer:
             roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
                                                     roi_list = all_rois[region],
                                                     hemi = 'BH')
-            
-            self.plot_flatmap(r2_all, roi_vertices_BH, 
-                                    vmin = 0, vmax = .6, cmap='hot', 
-                                    fig_abs_name = fig_name.replace('.png', '_{r}.png'.format(r=region))) 
 
+            self.plot_flatmap(r2_all, vmin1 = 0, vmax1 = .6, cmap='hot', 
+                                    verts = roi_vertices_BH,
+                                    fig_abs_name = fig_name.replace('.png', '_{r}.png'.format(r=region)))
+            
     def plot_betas_over_y(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
                                 nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 150,
                                 all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
@@ -911,11 +1163,37 @@ class somaViewer:
                         dpi=100,bbox_inches = 'tight')
 
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
-                                    n_bins = 256, plot_cuttout = False, custom_dm = True, keep_b_evs = False):
+                                    n_bins = 256, custom_dm = True, keep_b_evs = False,
+                                    all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
+                                            'S2': ['OP1'],'SMA': ['6mp', '6ma', 'SCEF'],
+                                            'sPMC': ['6d', '6a'],'iPMC': ['6v', '6r']}):
 
         """
         plot COM maps from GLM betas
+        throughout surface and for a specific brain region
+
+        Parameters
+        ----------
+        participant: str
+            participant ID 
+        region: str
+            movement region name 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out) 
+        fixed_effects: bool
+            if we want to use fixed effects across runs  
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands) 
+        all_rois: dict
+            dictionary with names of ROIs and and list of glasser atlas labels  
+        n_bins: int
+            number of bins for colormap 
         """
+        
+        ## labels for went using regresors for both sides
+        sides_list = ['L', 'R'] if keep_b_evs == False else ['L', 'R', 'B']
 
         # if we want to used loo betas, and fixed effects t-stat
         if (fit_type == 'loo_run') and (fixed_effects == True): 
@@ -926,11 +1204,9 @@ class somaViewer:
             # if output path doesn't exist, create it
             os.makedirs(fig_pth, exist_ok = True)
 
-            # get list with gii files
-            gii_filenames = self.somaModelObj.get_soma_file_list(participant, 
-                                                file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension'])
             # get all run lists
-            run_loo_list = self.somaModelObj.get_run_list(gii_filenames)
+            run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(participant, 
+                                                        file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
 
             ## get average beta values 
             _, r2 = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
@@ -959,184 +1235,86 @@ class somaViewer:
                                                     'sub-{sj}'.format(sj = participant), 
                                                     fit_type)
 
+        ## make alpha mask 
         # normalize the distribution, for better visualization
-        region_mask_alpha = normalize(np.clip(r2, 0, .6)) 
+        region_mask_alpha = normalize(np.clip(r2, 0, .5)) 
 
-        # call COM function
+        ## call COM function
         self.somaModelObj.make_COM_maps(participant, region = region, fit_type = fit_type, fixed_effects = fixed_effects,
                                                     custom_dm = custom_dm, keep_b_evs = keep_b_evs)
-
-        sides_list = ['L', 'R'] if keep_b_evs == False else ['L', 'R', 'B']
 
         ## load atlas ROI df
         self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
 
         ## load COM values and plot
         if region == 'face':
-
-            com_betas_dir = op.join(com_filepath, 'COM_reg-face.npy')
-
-            COM_region = np.load(com_betas_dir, allow_pickle = True)
+            
+            # load COM
+            COM_region = np.load(op.join(com_filepath, 'COM_reg-face.npy'), allow_pickle = True)
             
             # create costume colormp J4
-            n_bins = 256
-            col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = ['navy','forestgreen','darkorange','purple'],
+            col2D_name = op.splitext(op.split(self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['face'],
                                                                 bins = n_bins, cmap_name = 'costum_face'))[-1])[0]
             print('created costum colormap %s'%col2D_name)
-            
-            # vertex for face vs all others
-            flatmap = cortex.Vertex2D(COM_region, 
-                                    region_mask_alpha,
-                                    subject = self.pysub,
-                                    vmin=0, vmax=3,
-                                    vmin2 = 0, vmax2 = 1,
-                                    cmap = col2D_name)
 
-            cortex.quickshow(flatmap,with_curvature=True,with_sulci=True,with_colorbar=True, 
-                                curvature_brightness = 0.4, curvature_contrast = 0.1)
-            
-            filename = op.join(fig_pth, 'COM_flatmap_region-face.png')
-            print('saving %s' %filename)
-            _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
-                                                with_curvature=True,with_sulci=True,with_labels=False,
-                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+            self.plot_flatmap(COM_region, 
+                                est_arr2 = region_mask_alpha, 
+                                vmin1 = 0, vmax1 = 3, vmin2 = 0, vmax2 = 1,
+                                cmap = col2D_name, 
+                                fig_abs_name = op.join(fig_pth, 'COM_flatmap_region-face.png'))
 
             ## save same plot but for a few glasser ROIs
-            for region, region_label in {'M1': ['4'], 'S1': ['3b']}.items():
+            for region, region_label in all_rois.items():
                 
                 # get roi vertices for BH
                 roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
                                                         roi_list = region_label,
                                                         hemi = 'BH')
-                
-                region_com_arr = np.zeros(COM_region.shape[0]); region_com_arr[:] = np.nan
-                region_com_arr[roi_vertices_BH] = COM_region[roi_vertices_BH]
 
-                # vertex for face vs all others
-                flatmap = cortex.Vertex2D(region_com_arr, 
-                                        region_mask_alpha,
-                                        subject = self.pysub,
-                                        vmin=0, vmax=3,
-                                        vmin2 = 0, vmax2 = 1,
-                                        cmap = col2D_name)
-                
-                filename = op.join(fig_pth, 'COM_flatmap_region-face_{r}.png'.format(r = region))
-                print('saving %s' %filename)
-                _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
-                                                    with_curvature=True,with_sulci=True,with_labels=False,
-                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
-                
-
-            if plot_cuttout:
-                # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
-                # left hemi
-                cutout_name = 'zoom_roi_left'
-                _ = cortex.quickflat.make_figure(flatmap,
-                                                with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
-                                                cutout=cutout_name,height=2048)
-
-                filename = op.join(fig_pth, 'COM_cutout_region-face_LH.png')
-                print('saving %s' %filename)
-                _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
-                                            cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
-                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
-                # right hemi
-                cutout_name = 'zoom_roi_right'
-                _ = cortex.quickflat.make_figure(flatmap,
-                                                with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
-                                                cutout=cutout_name,height=2048)
-
-                filename = op.join(fig_pth, 'COM_cutout_region-face_RH.png')
-                print('saving %s' %filename)
-                _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
-                                            cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
-                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
-
+                self.plot_flatmap(COM_region, est_arr2 = region_mask_alpha, 
+                                verts = roi_vertices_BH,
+                                vmin1 = 0, vmax1 = 3, vmin2 = 0, vmax2 = 1,
+                                cmap = col2D_name, 
+                                fig_abs_name = op.join(fig_pth, 
+                                                        'COM_flatmap_region-face_{r}.png'.format(r = region)))
                 
         else:
             for side in sides_list:
                 
-                com_betas_dir = op.join(com_filepath, 'COM_reg-upper_limb_{s}.npy'.format(s=side))
-
-                COM_region = np.load(com_betas_dir, allow_pickle = True)
+                ## load COM
+                COM_region = np.load(op.join(com_filepath, 'COM_reg-upper_limb_{s}.npy'.format(s=side)), 
+                                        allow_pickle = True)
                 
-                # create costume colormp J4
-                n_bins = 256
-                col2D_name = op.splitext(op.split(add_alpha2colormap(colormap = 'rainbow_r',
+                ## create custom colormap
+                col2D_name = op.splitext(op.split(self.make_colormap(colormap = 'rainbow_r',
                                                                     bins = n_bins, 
                                                                     cmap_name = 'rainbow_r'))[-1])[0]
                 print('created costum colormap %s'%col2D_name)
 
-
-                # vertex for face vs all others
-                flatmap = cortex.Vertex2D(COM_region, 
-                                        region_mask_alpha,
-                                        subject = self.pysub,
-                                        vmin=0, vmax=4,
-                                        vmin2 = 0, vmax2 = 1,
-                                        cmap = col2D_name)
-
-                cortex.quickshow(flatmap,with_curvature=True,with_sulci=True,with_colorbar=True, 
-                                curvature_brightness = 0.4, curvature_contrast = 0.1)
-            
-                filename = op.join(fig_pth, 'COM_flatmap_region-upper_limb_{s}hand.png'.format(s=side))
-                print('saving %s' %filename)
-                _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
-                                                    with_curvature=True,with_sulci=True,with_labels=False,
-                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
-
+                self.plot_flatmap(COM_region, est_arr2 = region_mask_alpha, 
+                                vmin1 = 0, vmax1 = 4, vmin2 = 0, vmax2 = 1,
+                                cmap = col2D_name, 
+                                fig_abs_name = op.join(fig_pth, 
+                                                        'COM_flatmap_region-upper_limb_{s}hand.png'.format(s=side)))
+               
                 ## save same plot but for a few glasser ROIs
-                for region, region_label in {'M1': ['4'], 'S1': ['3b']}.items():
+                for region, region_label in all_rois.items():
                     
                     # get roi vertices for BH
                     roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
                                                             roi_list = region_label,
                                                             hemi = 'BH')
-                    
-                    region_com_arr = np.zeros(COM_region.shape[0]); region_com_arr[:] = np.nan
-                    region_com_arr[roi_vertices_BH] = COM_region[roi_vertices_BH]
 
-                    # vertex for face vs all others
-                    flatmap = cortex.Vertex2D(region_com_arr, 
-                                            region_mask_alpha,
-                                            subject = self.pysub,
-                                            vmin=0, vmax=4,
-                                            vmin2 = 0, vmax2 = 1,
-                                            cmap = col2D_name)
-                    
-                    filename = op.join(fig_pth, 'COM_flatmap_region-upper_limb_{s}hand_{r}.png'.format(s=side,r = region))
-                    print('saving %s' %filename)
-                    _ = cortex.quickflat.make_png(filename, flatmap, recache=False,with_colorbar=True,
-                                                        with_curvature=True,with_sulci=True,with_labels=False,
-                                                        curvature_brightness = 0.4, curvature_contrast = 0.1)
-
-                if plot_cuttout:
-                    # Name of a sub-layer of the 'cutouts' layer in overlays.svg file
-                    # left hemi
-                    cutout_name = 'zoom_roi_left'
-                    _ = cortex.quickflat.make_figure(flatmap,
-                                                    with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
-                                                    cutout=cutout_name,height=2048)
-
-                    filename = op.join(fig_pth, 'COM_cutout_region-upper_limb_{s}hand_LH.png'.format(s=side))
-                    print('saving %s' %filename)
-                    _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
-                                                cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
-                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
-                    # right hemi
-                    cutout_name = 'zoom_roi_right'
-                    _ = cortex.quickflat.make_figure(flatmap,
-                                                    with_curvature=True, with_sulci=True, with_roi=False,with_colorbar=False,
-                                                    cutout=cutout_name,height=2048)
-
-                    filename = op.join(fig_pth, 'COM_cutout_region-upper_limb_{s}hand_RH.png'.format(s=side))
-                    print('saving %s' %filename)
-                    _ = cortex.quickflat.make_png(filename, flatmap, recache=True,with_colorbar=False,with_labels=False,
-                                                cutout=cutout_name,with_curvature=True,with_sulci=True,with_roi=False,height=2048,
-                                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+                    self.plot_flatmap(COM_region, est_arr2 = region_mask_alpha, 
+                                verts = roi_vertices_BH,
+                                vmin1 = 0, vmax1 = 4, vmin2 = 0, vmax2 = 1,
+                                cmap = col2D_name, 
+                                fig_abs_name = op.join(fig_pth, 
+                                'COM_flatmap_region-upper_limb_{s}hand_{r}.png'.format(s=side,r = region)))
+                
 
 
-class pRFViewer:
+class pRFViewer(Viewer):
 
     def __init__(self, pRFModelObj, outputdir = None, pysub = 'fsaverage'):
         
@@ -1153,6 +1331,9 @@ class pRFViewer:
             basename of pycortex subject folder, where we drew all ROIs. 
         """
 
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(pysub = pysub)
+
         # set object to use later on
         self.pRFModelObj = pRFModelObj
 
@@ -1162,12 +1343,6 @@ class pRFViewer:
         else:
             self.outputdir = outputdir
 
-        # set font type for plots globally
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = 'Helvetica'
-
-        # pycortex subject to use
-        self.pysub = pysub
 
     def plot_vertex_tc(self, participant, vertex = None, run_type = 'mean_run', fit_now = True,
                             model2fit = 'gauss', chunk_num = None, ROI = None, fit_hrf = False):
@@ -1371,11 +1546,11 @@ class pRFViewer:
         ## pRF Eccentricity
 
         # make costum colormap
-        ecc_cmap = make_colormap(colormap = ['#dd3933','#f3eb53','#7cb956','#82cbdb','#3d549f'],
+        ecc_cmap = self.make_colormap(colormap = ['#dd3933','#f3eb53','#7cb956','#82cbdb','#3d549f'],
                                             bins = 256, cmap_name = 'ECC_mackey_costum', 
                                             discrete = False, add_alpha = False, return_cmap = True)
 
-        click_plotter.images['ecc'] = make_raw_vertex_image(eccentricity, 
+        click_plotter.images['ecc'] = self.make_raw_vertex_image(eccentricity, 
                                                             cmap = ecc_cmap, 
                                                             vmin = 0, vmax = 6, 
                                                             data2 = alpha_level, 
@@ -1383,7 +1558,7 @@ class pRFViewer:
                                                             subject = self.pysub, data2D = True)
 
         ## pRF Size
-        click_plotter.images['size_fwhmax'] = make_raw_vertex_image(size_fwhmax, 
+        click_plotter.images['size_fwhmax'] = self.make_raw_vertex_image(size_fwhmax, 
                                                     cmap = 'hot', vmin = 0, vmax = 14, 
                                                     data2 = alpha_level, 
                                                     vmin2 = 0, vmax2 = 1, 
@@ -1391,12 +1566,12 @@ class pRFViewer:
 
         ## pRF Polar Angle
         # get matplotlib color map from segmented colors
-        PA_cmap = make_colormap(colormap = ['#ec9b3f','#f3eb53','#7cb956','#82cbdb',
+        PA_cmap = self.make_colormap(colormap = ['#ec9b3f','#f3eb53','#7cb956','#82cbdb',
                                                     '#3d549f','#655099','#ad5a9b','#dd3933'], bins = 256, 
                                                     cmap_name = 'PA_mackey_costum',
                                                     discrete = False, add_alpha = False, return_cmap = True)
 
-        click_plotter.images['PA'] = make_raw_vertex_image(polar_angle_norm, 
+        click_plotter.images['PA'] = self.make_raw_vertex_image(polar_angle_norm, 
                                                     cmap = PA_cmap, vmin = 0, vmax = 1, 
                                                     data2 = alpha_level, 
                                                     vmin2 = 0, vmax2 = 1, 

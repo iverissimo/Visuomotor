@@ -90,6 +90,19 @@ plotting:
     n_TR: 84 # after cropping (original 90)
 
   soma:
+    colormaps:
+      face: ['navy','forestgreen','darkorange','purple']
+      upper_limb: 'rainbow_r'
+    roi2plot:
+      M1: ['4'] # primary motor cortex (Brodmann area 4)
+      S1: ['3b'] 
+      CS: ['3a']
+      BA43: ['43', 'OP4'] # BA43, language
+      S2: ['OP1']
+      POC: ['43', 'FOP1', 'OP4', 'OP1', 'OP2-3', 'PFcm'] #posterior operculum of the Sylvian fissure as defined by glasser paper
+      Insula: ['52', 'PI', 'Ig', 'PoI1', 'PoI2', 'FOP2', 'FOP3', 
+                'MI', 'AVI', 'AAIC', 'Pir','FOP4', 'FOP5'] #frontal operculum + insula as defined by glasser paper
+
     glasser_rois:
       M1: ['4'] # primary motor cortex (Brodmann area 4)
       S1: ['3a', '3b', '1', '2'] #['3b'] #['3a', '3b', '1'] # primary sensory cortex (Brodman area 3) 

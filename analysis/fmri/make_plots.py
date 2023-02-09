@@ -128,11 +128,13 @@ elif task == 'soma':
         ## loop over all subjects 
         for pp in Visuomotor_data.sj_num:
             plotter.plot_COM_maps(pp, region = region, custom_dm = custom_dm, fit_type = run_type,
+                                        all_rois = Visuomotor_data.params['plotting']['soma']['roi2plot'],
                                         keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
     elif py_cmd == 'rsq':
 
-        plotter.plot_rsq(Visuomotor_data.sj_num, fit_type = run_type)
+        plotter.plot_rsq(Visuomotor_data.sj_num, fit_type = run_type,
+                            all_rois = Visuomotor_data.params['plotting']['soma']['roi2plot'])
 
     elif py_cmd == 'beta_y_dist':
 

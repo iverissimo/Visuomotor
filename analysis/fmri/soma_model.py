@@ -1816,8 +1816,11 @@ class somaRF_Model(somaModel):
         """
         Helper function to return prediction
         """
-
-        return self.gauss1D_cart(np.arange(nr_points), mu = mu, sigma = size) * slope
+        if isinstance(nr_points, np.ndarray) or isinstance(nr_points, list):
+            timepoints = nr_points
+        else:
+            timepoints = np.arange(nr_points)
+        return self.gauss1D_cart(timepoints, mu = mu, sigma = size) * slope
 
     def get_RF_COM(self, mu_arr = [], size_arr = [], slope_arr = [], nr_points = 4):
 
