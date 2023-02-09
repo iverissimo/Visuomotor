@@ -93,6 +93,9 @@ plotting:
     colormaps:
       face: ['navy','forestgreen','darkorange','purple']
       upper_limb: 'rainbow_r'
+
+    reference_roi: ['3a']
+    
     roi2plot:
       M1: ['4'] # primary motor cortex (Brodmann area 4)
       S1: ['3b'] 
