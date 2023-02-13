@@ -1362,7 +1362,176 @@ class somaViewer(Viewer):
                                 fig_abs_name = op.join(fig_pth, 
                                 'COM_flatmap_region-upper_limb_{s}hand_{r}.png'.format(s=side,r = region)))
                 
+    def get_COM_df(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
+                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 40, z_threshold = 3.1,
+                                all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
+                                'BA43': ['43', 'OP4'], 'S2': ['OP1'],
+            'Insula': ['52', 'PI', 'Ig', 'PoI1', 'PoI2', 'FOP2', 'FOP3','MI', 'AVI', 'AAIC']
+            }):
 
+        """
+        Helper function to get COM values over y axis 
+        (for all relevant vertices and also binned)
+        for each movement region of interest
+        and for selected ROIs.
+        Returns df with info
+
+        Parameters
+        ----------
+        participant: str
+            participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)
+        roi2plot_list: list
+            list with ROI names to plot
+        all_regions: list
+            with movement region name 
+        all_rois: dict
+            dictionary with names of ROIs and and list of glasser atlas labels  
+        n_bins: int
+            number of y coord bins to divide COM values into
+        """
+
+        ## store all COM values but also the binned version
+        output_df = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'coordinates': [],
+                                'COM': [], 'r2': [], 'movement_region': []})
+        output_df_binned = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'coordinates': [],
+                                'COM': [], 'movement_region': []})
+
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
+        ## use CS as major axis for ROI coordinate rotation
+        ref_theta = self.somaModelObj.get_rotation_angle(self.somaModelObj.atlas_df, 
+                                            roi_list = self.somaModelObj.MRIObj.params['plotting']['soma']['reference_roi'])
+
+        ## get surface x and y coordinates
+        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+                                                                        merge = True)
+
+        ## loop over participant list
+        for pp in participant_list:
+            
+            ## LOAD R2
+            if fit_type == 'loo_run':
+                # get all run lists
+                run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(pp, 
+                                                    file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
+
+                ## get average beta values (all used in GLM)
+                betas_pp, r2_pp = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list)
+
+                # path where Region contrasts were stored
+                stats_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_stats', 
+                                                        'sub-{sj}'.format(sj = pp), 'fixed_effects', fit_type)
+
+                # load z-score localizer area, for region movements
+                region_mask = {}
+                region_mask['upper_limb'] = self.somaModelObj.load_zmask(region = 'upper_limb', filepth = stats_dir, 
+                                                            fit_type = fit_type, fixed_effects = True, 
+                                                            z_threshold = z_threshold, keep_b_evs = keep_b_evs)['B']
+                region_mask['face'] = self.somaModelObj.load_zmask(region = 'face', filepth = stats_dir, 
+                                                            fit_type = fit_type, fixed_effects = True, 
+                                                            z_threshold = z_threshold, keep_b_evs = keep_b_evs)
+                
+                ## get positive and relevant r2
+                r2_mask = np.zeros(r2_pp.shape)
+                r2_mask[r2_pp > 0] = 1
+            else:
+                # load GLM estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+                r2_pp = soma_estimates['r2']
+                betas_pp = soma_estimates['betas']
+
+            ## Get DM
+            design_matrix = self.somaModelObj.load_design_matrix(pp, keep_b_evs = keep_b_evs, 
+                                            custom_dm = True, nTRs = nr_TRs)
+
+            ## set beta values and reg names in dict
+            ## for all relevant regions
+            region_regs_dict = {}
+            region_betas_dict = {}
+
+            reg_list = [] # also store all regressor names
+            for region in all_regions:
+                region_betas_dict[region] = self.somaModelObj.get_region_betas(betas_pp, region = region, dm = design_matrix)
+                region_regs_dict[region] = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region]
+                reg_list += region_regs_dict[region]
+
+            ## make array of weights to use in bin
+            weight_arr = r2_pp.copy()
+            weight_arr[weight_arr<=0] = 0 # to not use negative weights
+
+            # for each roi, get values and store in DF
+            for roi2plot in roi2plot_list:
+
+                ## get FS coordinates for each ROI vertex
+                roi_vertices = {}
+                roi_coords = {}
+                for hemi in self.hemi_labels:
+                    roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                        roi_list = all_rois[roi2plot],
+                                                        hemi = hemi)
+                    ## get FS coordinates for each ROI vertex
+                    roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                                                                                            y_coord_surf[roi_vertices[hemi]])), 
+                                                                        fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
+                                                                        theta = ref_theta[hemi],
+                                                                        roi_name = roi2plot+'_'+hemi)
+
+                    # for each movement region
+                    for region in all_regions:
+                        
+                        ## fixed effects mask * positive CV-r2
+                        if region != 'face':
+                            mask_bool = ((~np.isnan(region_mask['upper_limb'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+                        else:
+                            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+
+                        if not ((hemi == 'LH') and (region == 'left_hand')) or \
+                            not ((hemi == 'RH') and (region == 'right_hand')):
+                            
+                            # calculate COM values
+                            com_vals = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool]
+
+                            # append
+                            output_df = pd.concat((output_df,
+                                                    pd.DataFrame({'sj': np.tile(pp, len(com_vals)), 
+                                                                'ROI': np.tile(roi2plot, len(com_vals)), 
+                                                                'hemisphere': np.tile(hemi, len(com_vals)), 
+                                                                'movement_region': np.tile(region, len(com_vals)),
+                                                                'coordinates': roi_coords[hemi][1][mask_bool],
+                                                                'COM': com_vals, 
+                                                                'r2': r2_pp[roi_vertices[hemi]][mask_bool]})
+                                        ),ignore_index=True)
+                            
+                            # calculate weighted bins
+                            binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': com_vals, 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+                            
+                            # append
+                            output_df_binned = pd.concat((output_df_binned,
+                                                    pd.DataFrame({'sj': np.tile(pp, len(binned_com)), 
+                                                                'ROI': np.tile(roi2plot, len(binned_com)), 
+                                                                'hemisphere': np.tile(hemi, len(binned_com)), 
+                                                                'movement_region': np.tile(region, len(binned_com)),
+                                                                'coordinates': binned_coord,
+                                                                'COM': binned_com})
+                                        ),ignore_index=True)
+
+        return output_df, output_df_binned
+
+        
 
 class pRFViewer(Viewer):
 
