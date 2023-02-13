@@ -918,7 +918,7 @@ class somaViewer(Viewer):
                                 dpi=100,bbox_inches = 'tight')
 
     def plot_COM_over_y(self, participant, fit_type = 'loo_run', keep_b_evs = True,
-                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 15,
+                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 40,
                                 z_threshold = 3.1,
                                 all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
                                 all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
@@ -928,13 +928,30 @@ class somaViewer(Viewer):
                                             
         """
         plot scatter plot and binned average of COM values over y axis,
-        for each regressor of interest
+        for each movement region of interest
         and for selected ROIs
+
+        Parameters
+        ----------
+        participant: str
+            participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)
+        roi2plot_list: list
+            list with ROI names to plot
+        all_regions: list
+            with movement region name 
+        all_rois: dict
+            dictionary with names of ROIs and and list of glasser atlas labels  
+        n_bins: int
+            number of y coord bins to divide COM values into
         """
 
         # make costum colormap for face
         cmap = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['face'],
-                                                                bins = n_bins, cmap_name = 'costum_face', return_cmap = True)
+                                                                bins = 256, cmap_name = 'costum_face', return_cmap = True)
 
         ## load atlas ROI df
         self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
@@ -1003,10 +1020,14 @@ class somaViewer(Viewer):
             region_regs_dict[region] = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region]
             reg_list += region_regs_dict[region]
 
+        ## make array of weights to use in bin
+        weight_arr = r2.copy()
+        weight_arr[weight_arr<=0] = 0 # to not use negative weights
+
         # for each roi, make plot
         for roi2plot in roi2plot_list:
 
-            # get vertices for each hemisphere
+            ## get FS coordinates for each ROI vertex
             roi_vertices = {}
             roi_coords = {}
             for hemi in self.hemi_labels:
@@ -1051,23 +1072,25 @@ class somaViewer(Viewer):
                     fig, axs = plt.subplots(1, 2, figsize=(12,4))
 
                     region = 'right_hand'
-                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
-                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                        statistic=lambda y: np.nanmean(y), 
-                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
-                    axs[0].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
-                    axs[0].set_xlim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+                    axs[0].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
+                    axs[0].set_xlim(-20,20) 
                     axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
                     axs[0].set_title('Right Hand', fontsize=20)
 
                     region = 'both_hand'
-                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
-                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                        statistic=lambda y: np.nanmean(y), 
-                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
-                    axs[1].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
-                    axs[1].set_xlim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+                    axs[1].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
+                    axs[1].set_xlim(-20,20) 
                     axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
                     axs[1].set_title('Both Hand', fontsize=20)
@@ -1103,22 +1126,24 @@ class somaViewer(Viewer):
                     fig, axs = plt.subplots(1, 2, figsize=(12,4))
 
                     region = 'left_hand'
-                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
-                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                        statistic=lambda y: np.nanmean(y), 
-                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
-                    axs[0].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
+                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+                    axs[0].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
                     axs[0].set_xlim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
                     axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
                     axs[0].set_title('Left Hand', fontsize=20)
 
                     region = 'both_hand'
-                    binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
-                                                        COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                        statistic=lambda y: np.nanmean(y), 
-                                                        bins=np.linspace(-20, 20, n_bins+1, endpoint=False))[:2]
-                    axs[1].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = 'rainbow_r')
+                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+                    axs[1].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
                     axs[1].set_xlim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
                     axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
@@ -1161,11 +1186,12 @@ class somaViewer(Viewer):
 
             hemi = 'LH'
             mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-            binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
-                                                COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                statistic=lambda y: np.nanmean(y), 
-                                                bins=np.linspace(-50, 0, n_bins+1, endpoint=False))[:2]
-            axs[0].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = cmap)
+            binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+            axs[0].scatter(binned_coord, binned_com, c=binned_com, cmap = cmap)
             axs[0].set_xlim(-50,0) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
             axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
             axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
@@ -1173,11 +1199,12 @@ class somaViewer(Viewer):
 
             hemi = 'RH'
             mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-            binned_x, binned_y = scipy.stats.binned_statistic(roi_coords[hemi][1][mask_bool], 
-                                                COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                statistic=lambda y: np.nanmean(y), 
-                                                bins=np.linspace(-50, 0, n_bins+1, endpoint=False))[:2]
-            axs[1].scatter(binned_y[:-1],binned_x, c=binned_x,cmap = cmap)
+            binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
+                                                                         'coords': roi_coords[hemi][1][mask_bool], 
+                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
+                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
+                                                           weight_key = 'r2', n_bins = n_bins)
+            axs[1].scatter(binned_coord, binned_com, c=binned_com, cmap = cmap)
             axs[1].set_xlim(-50,0) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
             axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
             axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
