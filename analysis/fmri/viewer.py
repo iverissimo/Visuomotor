@@ -917,8 +917,8 @@ class somaViewer(Viewer):
             fig.savefig(fig_name.replace('.png', '_{roi_name}.png'.format(roi_name = roi2plot)), 
                                 dpi=100,bbox_inches = 'tight')
 
-    def plot_COM_over_y(self, participant, fit_type = 'loo_run', keep_b_evs = True,
-                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 40,
+    def plot_COM_over_y(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
+                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 50,
                                 z_threshold = 3.1,
                                 all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
                                 all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
@@ -933,8 +933,8 @@ class somaViewer(Viewer):
 
         Parameters
         ----------
-        participant: str
-            participant ID 
+        participant_list: list
+            list with participant ID 
         fit_type: str
             type of run to fit (mean of all runs, or leave one out)  
         keep_b_evs: bool
@@ -949,268 +949,369 @@ class somaViewer(Viewer):
             number of y coord bins to divide COM values into
         """
 
-        # make costum colormap for face
-        cmap = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['face'],
+        ## make costum colormap for face and hands
+        cmap_face = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['face'],
                                                                 bins = 256, cmap_name = 'costum_face', return_cmap = True)
+        cmap_hands = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['upper_limb'],
+                                                                bins = 256, cmap_name = 'costum_hand', return_cmap = True) 
 
-        ## load atlas ROI df
-        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+        ## get COM df
+        COM_df, COM_df_binned = self.get_COM_coords_df(participant_list, fit_type = fit_type, keep_b_evs = keep_b_evs,
+                                                            nr_TRs = nr_TRs, roi2plot_list = roi2plot_list, n_bins = n_bins,
+                                                            z_threshold = z_threshold, all_regions = all_regions, all_rois = all_rois)
 
-        ## use CS as major axis for ROI coordinate rotation
-        ref_theta = self.somaModelObj.get_rotation_angle(self.somaModelObj.atlas_df, 
-                                            roi_list = self.somaModelObj.MRIObj.params['plotting']['soma']['reference_roi'])
+        for pp in participant_list:
 
-        ## get surface x and y coordinates
-        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
-                                                                        merge = True)
-            
-        ## LOAD R2
-        if fit_type == 'loo_run':
-            # get all run lists
-            run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(participant, 
-                                                file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
+            # set fig name
+            fig_name = op.join(self.outputdir, 'COM_vs_coord',
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'COM.png')
+            # if output path doesn't exist, create it
+            os.makedirs(op.split(fig_name)[0], exist_ok = True)
 
-            ## get average beta values (all used in GLM)
-            betas, r2 = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
-                                                        weighted_avg = True, runs2load = run_loo_list)
+            # for each roi, 
+            for roi2plot in roi2plot_list:
+                # for each hemi, make plot
+                for hemi in self.hemi_labels:
+                    
+                    ########## SCATTER PLOT ALL VALUES #########
+                    fig, axs = plt.subplots(1, 3, figsize=(18,4))
 
-            # path where Region contrasts were stored
-            stats_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_stats', 
-                                                    'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
-
-            # load z-score localizer area, for region movements
-            region_mask = {}
-            region_mask['upper_limb'] = self.somaModelObj.load_zmask(region = 'upper_limb', filepth = stats_dir, 
-                                                        fit_type = fit_type, fixed_effects = True, 
-                                                        z_threshold = z_threshold, keep_b_evs = keep_b_evs)['B']
-            region_mask['face'] = self.somaModelObj.load_zmask(region = 'face', filepth = stats_dir, 
-                                                        fit_type = fit_type, fixed_effects = True, 
-                                                        z_threshold = z_threshold, keep_b_evs = keep_b_evs)
-            
-            ## get positive and relevant r2
-            r2_mask = np.zeros(r2.shape)
-            r2_mask[r2 > 0] = 1
-        else:
-            # load GLM estimates, and get betas and prediction
-            soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
-                                            'sub-{sj}'.format(sj = participant), 
-                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                            allow_pickle=True).item()
-            r2 = soma_estimates['r2']
-
-        # set fig name
-        fig_name = op.join(self.outputdir, 'COM_vs_coord',
-                                            'sub-{sj}'.format(sj = participant), 
-                                            fit_type, 'COM.png')
-        # if output path doesn't exist, create it
-        os.makedirs(op.split(fig_name)[0], exist_ok = True)
-
-        ## Get DM
-        design_matrix = self.somaModelObj.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
-                                        custom_dm = True, nTRs = nr_TRs)
-
-        ## set beta values and reg names in dict
-        ## for all relevant regions
-        region_regs_dict = {}
-        region_betas_dict = {}
-
-        reg_list = [] # also store all regressor names
-        for region in all_regions:
-            region_betas_dict[region] = self.somaModelObj.get_region_betas(betas, region = region, dm = design_matrix)
-            region_regs_dict[region] = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region]
-            reg_list += region_regs_dict[region]
-
-        ## make array of weights to use in bin
-        weight_arr = r2.copy()
-        weight_arr[weight_arr<=0] = 0 # to not use negative weights
-
-        # for each roi, make plot
-        for roi2plot in roi2plot_list:
-
-            ## get FS coordinates for each ROI vertex
-            roi_vertices = {}
-            roi_coords = {}
-            for hemi in self.hemi_labels:
-                roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
-                                                    roi_list = all_rois[roi2plot],
-                                                    hemi = hemi)
-                ## get FS coordinates for each ROI vertex
-                roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
-                                                                                        y_coord_surf[roi_vertices[hemi]])), 
-                                                                    fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
-                                                                    theta = ref_theta[hemi],
-                                                                    roi_name = roi2plot+'_'+hemi)
-                ## fixed effects mask * positive CV-r2
-                mask_bool = ((~np.isnan(region_mask['upper_limb'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-                
-                ### FOR LEFT HEMISPHERE, plot COM for appropriate hand
-                if hemi == 'LH' :
-                    ##### plot figure - scatter
-                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
-
-                    region = 'right_hand'
-                    axs[0].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
-                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
-                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
-                    axs[0].set_ylim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
+                    if hemi == 'LH':
+                        # right hand
+                        aa = sns.scatterplot(data = COM_df[(COM_df['hemisphere'] == hemi) & \
+                                                (COM_df['ROI'] == roi2plot) & \
+                                                (COM_df['sj'] == pp) & \
+                                                ((COM_df['movement_region'] == 'right_hand'))], 
+                                        x = 'COM', y = 'coordinates', hue = 'COM', palette = cmap_hands, ax = axs[0], hue_norm = (0,4))
+                        axs[0].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['right_hand'][l]) for l in range(5)])
+                        axs[0].set_title('Right Hand', fontsize=20)
+                    else:
+                        # left hand
+                        aa = sns.scatterplot(data = COM_df[(COM_df['hemisphere'] == hemi) & \
+                                                (COM_df['ROI'] == roi2plot) & \
+                                                (COM_df['sj'] == pp) & \
+                                                ((COM_df['movement_region'] == 'left_hand'))], 
+                                        x = 'COM', y = 'coordinates', hue = 'COM', palette = cmap_hands, ax = axs[0], hue_norm = (0,4))
+                        axs[0].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['left_hand'][l]) for l in range(5)])
+                        axs[0].set_title('Left Hand', fontsize=20)
+                    
+                    axs[0].set_ylim(-20,20) 
+                    axs[0].set_xlim(0, 4)
                     axs[0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[0].set_xlabel('Betas COM', fontsize=15, labelpad=10)
-                    axs[0].set_title('Right Hand', fontsize=20)
 
-                    region = 'both_hand'
-                    axs[1].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
-                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
-                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
-                    axs[1].set_ylim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
+                    # both hands
+                    aa = sns.scatterplot(data = COM_df[(COM_df['hemisphere'] == hemi) & \
+                                            (COM_df['ROI'] == roi2plot) & \
+                                            (COM_df['sj'] == pp) & \
+                                            ((COM_df['movement_region'] == 'both_hand'))], 
+                                    x = 'COM', y = 'coordinates', hue = 'COM', palette = cmap_hands, ax = axs[1], hue_norm = (0,4))
+                    
+                    axs[1].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['both_hand'][l]) for l in range(5)])
+                    axs[1].set_ylim(-20,20) 
+                    axs[1].set_xlim(0, 4)
                     axs[1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[1].set_xlabel('Betas COM', fontsize=15, labelpad=10)
                     axs[1].set_title('Both Hand', fontsize=20)
-                    fig.savefig(fig_name.replace('.png', '_scatter_hands_LH_{roi_name}.png'.format(roi_name = roi2plot)), 
+
+                    # face
+                    aa = sns.scatterplot(data = COM_df[(COM_df['hemisphere'] == hemi) & \
+                                            (COM_df['ROI'] == roi2plot) & \
+                                            (COM_df['sj'] == pp) & \
+                                            ((COM_df['movement_region'] == 'face'))], 
+                                    x = 'COM', y = 'coordinates', hue = 'COM', palette = cmap_face, ax = axs[2], hue_norm = (0,3))
+                    
+                    axs[2].legend(loc='lower left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_face(int(256/3*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['face'][l]) for l in range(4)])
+                    axs[2].set_ylim(-50,0)
+                    axs[2].set_xlim(0, 3)
+                    axs[2].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[2].set_xlabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[2].set_title('Face', fontsize=20)
+
+                    fig.savefig(fig_name.replace('.png', '_scatter_hemisphere-{h}_{roi_name}.png'.format(roi_name = roi2plot, 
+                                                                                                        h = hemi)), 
                                 dpi=100,bbox_inches = 'tight')
 
-                    ##### plot figure - binned
-                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
+                    ########## SCATTER PLOT BINNED #########
+                    fig, axs = plt.subplots(1, 3, figsize=(18,4))
 
-                    region = 'right_hand'
-                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                                         'coords': roi_coords[hemi][1][mask_bool], 
-                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
-                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
-                                                           weight_key = 'r2', n_bins = n_bins)
-                    axs[0].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
+                    if hemi == 'LH':
+                        # right hand
+                        df2plot = COM_df_binned[(COM_df_binned['hemisphere'] == hemi) & \
+                                                (COM_df_binned['ROI'] == roi2plot) & \
+                                                (COM_df_binned['sj'] == pp) & \
+                                                ((COM_df_binned['movement_region'] == 'right_hand'))]
+                        name = 'right_hand'
+                    else:
+                        # left hand
+                        df2plot = COM_df_binned[(COM_df_binned['hemisphere'] == hemi) & \
+                                                (COM_df_binned['ROI'] == roi2plot) & \
+                                                (COM_df_binned['sj'] == pp) & \
+                                                ((COM_df_binned['movement_region'] == 'left_hand'))]
+                        name = 'left_hand'
+                        
+                    aa = sns.scatterplot(data = df2plot, 
+                                        y = 'COM', x = 'coordinates', hue = 'COM', palette = cmap_hands, ax = axs[0], hue_norm = (0,4))
+                    axs[0].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][name][l]) for l in range(5)])
+
+                    axs[0].errorbar(x = df2plot.coordinates.values, 
+                                    y = df2plot.COM.values, 
+                                    yerr = df2plot.COM_std.values,
+                                    xerr = df2plot.coordinates_std.values,
+                                    zorder=0, c='grey', alpha = 0.5)
                     axs[0].set_xlim(-20,20) 
+                    axs[0].set_ylim(0, 4)
                     axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
-                    axs[0].set_title('Right Hand', fontsize=20)
+                    axs[0].set_title('Right Hand', fontsize=20) if name == 'right_hand' else axs[0].set_title('Left Hand', fontsize=20) 
 
-                    region = 'both_hand'
-                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                                         'coords': roi_coords[hemi][1][mask_bool], 
-                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
-                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
-                                                           weight_key = 'r2', n_bins = n_bins)
-                    axs[1].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
+                    # both hands
+                    df2plot = COM_df_binned[(COM_df_binned['hemisphere'] == hemi) & \
+                                            (COM_df_binned['ROI'] == roi2plot) & \
+                                            (COM_df_binned['sj'] == pp) & \
+                                            ((COM_df_binned['movement_region'] == 'both_hand'))]
+                    aa = sns.scatterplot(data = df2plot, 
+                                    y = 'COM', x = 'coordinates', hue = 'COM', palette = cmap_hands, ax = axs[1],hue_norm = (0,4))
+                    
+                    axs[1].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['both_hand'][l]) for l in range(5)])
+                    axs[1].errorbar(x = df2plot.coordinates.values, 
+                                    y = df2plot.COM.values, 
+                                    yerr = df2plot.COM_std.values,
+                                    xerr = df2plot.coordinates_std.values,
+                                    zorder=0, c='grey', alpha = 0.5)
                     axs[1].set_xlim(-20,20) 
+                    axs[1].set_ylim(0, 4)
                     axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
                     axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
                     axs[1].set_title('Both Hand', fontsize=20)
-                    fig.savefig(fig_name.replace('.png', '_binned_hands_LH_{roi_name}.png'.format(roi_name = roi2plot)), 
+
+                    # face
+                    df2plot = COM_df_binned[(COM_df_binned['hemisphere'] == hemi) & \
+                                            (COM_df_binned['ROI'] == roi2plot) & \
+                                            (COM_df_binned['sj'] == pp) & \
+                                            ((COM_df_binned['movement_region'] == 'face'))]
+                    aa = sns.scatterplot(data = df2plot, 
+                                    y = 'COM', x = 'coordinates', hue = 'COM', palette = cmap_face, ax = axs[2],hue_norm = (0,3))
+                    
+                    axs[2].legend(loc='lower left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_face(int(256/3*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['face'][l]) for l in range(4)])
+                    axs[2].errorbar(x = df2plot.coordinates.values, 
+                                    y = df2plot.COM.values, 
+                                    yerr = df2plot.COM_std.values,
+                                    xerr = df2plot.coordinates_std.values,
+                                    zorder=0, c='grey', alpha = 0.5)
+                    axs[2].set_xlim(-50,0)
+                    axs[2].set_ylim(0, 3)
+                    axs[2].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[2].set_ylabel('Betas COM', fontsize=15, labelpad=10)
+                    axs[2].set_title('Face', fontsize=20)
+
+                    fig.savefig(fig_name.replace('.png', '_binned_hemisphere-{h}_{roi_name}.png'.format(roi_name = roi2plot, 
+                                                                                                        h = hemi)), 
                                 dpi=100,bbox_inches = 'tight')
 
-                ### FOR RIGHT HEMISPHERE, plot COM for appropriate hand
-                else:     
-                    ##### plot figure - scatter
-                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
+    def plot_RF_over_y(self, participant_list, data_RFmodel = None,
+                                fit_type = 'loo_run', keep_b_evs = True,
+                                nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 50,
+                                z_threshold = 3.1,
+                                all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
+                                'BA43': ['43', 'OP4'], 'S2': ['OP1'],
+            'Insula': ['52', 'PI', 'Ig', 'PoI1', 'PoI2', 'FOP2', 'FOP3','MI', 'AVI', 'AAIC']
+            }):
+                                            
+        """
+        plot scatter plot and binned average of RF values over y axis,
+        for each movement region of interest
+        and for selected ROIs
 
-                    region = 'left_hand'
-                    axs[0].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
-                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
-                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
-                    axs[0].set_ylim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
-                    axs[0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-                    axs[0].set_xlabel('Betas COM', fontsize=15, labelpad=10)
-                    axs[0].set_title('Left Hand', fontsize=20)
+        Parameters
+        ----------
+        participant_list: list
+            list with participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)
+        roi2plot_list: list
+            list with ROI names to plot
+        all_regions: list
+            with movement region name 
+        all_rois: dict
+            dictionary with names of ROIs and and list of glasser atlas labels  
+        n_bins: int
+            number of y coord bins to divide COM values into
+        """
 
-                    region = 'both_hand'
-                    axs[1].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
-                                roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
-                            c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] ,cmap = 'rainbow_r')
-                    axs[1].set_ylim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
-                    axs[1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-                    axs[1].set_xlabel('Betas COM', fontsize=15, labelpad=10)
-                    axs[1].set_title('Both Hand', fontsize=20)
-                    fig.savefig(fig_name.replace('.png', '_scatter_hands_RH_{roi_name}.png'.format(roi_name = roi2plot)), 
+        ## make costum colormap for face and hands
+        cmap_face = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['face'],
+                                                                bins = 256, cmap_name = 'costum_face', return_cmap = True)
+        cmap_hands = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['upper_limb'],
+                                                                bins = 256, cmap_name = 'costum_hand', return_cmap = True) 
+
+        ## get RF df
+        RF_df = self.get_RF_coords_df(participant_list, data_RFmodel = data_RFmodel,
+                                                        fit_type = fit_type, keep_b_evs = keep_b_evs,
+                                                            roi2plot_list = roi2plot_list, 
+                                                            z_threshold = z_threshold, all_regions = all_regions, all_rois = all_rois)
+
+        for pp in participant_list:
+
+            # set fig name
+            fig_name = op.join(self.outputdir, 'RF_vs_coord',
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'RF.png')
+            # if output path doesn't exist, create it
+            os.makedirs(op.split(fig_name)[0], exist_ok = True)
+
+            # for each roi, 
+            for roi2plot in roi2plot_list:
+                # for each hemi, make plot
+                for hemi in self.hemi_labels:
+                    
+                    ########## SCATTER PLOT ALL VALUES #########
+                    fig, axs = plt.subplots(2, 3, figsize=(18,10))
+
+                    if hemi == 'LH':
+                        # right hand
+                        aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                                (RF_df['ROI'] == roi2plot) & \
+                                                (RF_df['sj'] == pp) & \
+                                                (RF_df['RF_r2'] > 0) & \
+                                                (RF_df['slope'] > 0) & \
+                                                ((RF_df['movement_region'] == 'right_hand'))], 
+                                        x = 'center', y = 'coordinates', hue = 'center', palette = cmap_hands, 
+                                        ax = axs[0][0], hue_norm = (0,4))
+                        axs[0][0].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['right_hand'][l]) for l in range(5)])
+                        axs[0][0].set_title('Right Hand', fontsize=20)
+                        name = 'right_hand'
+                    else:
+                        # left hand
+                        aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                                (RF_df['ROI'] == roi2plot) & \
+                                                (RF_df['sj'] == pp) & \
+                                                (RF_df['RF_r2'] > 0) & \
+                                                (RF_df['slope'] > 0) & \
+                                                ((RF_df['movement_region'] == 'left_hand'))], 
+                                        x = 'center', y = 'coordinates', hue = 'center', palette = cmap_hands, 
+                                        ax = axs[0][0], hue_norm = (0,4))
+                        axs[0][0].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['left_hand'][l]) for l in range(5)])
+                        axs[0][0].set_title('Left Hand', fontsize=20)
+                        name = 'left_hand'
+                    
+                    axs[0][0].set_ylim(-20,20) 
+                    axs[0][0].set_xlim(-.5, 4.5)
+                    axs[0][0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0][0].set_xlabel('RF center', fontsize=15, labelpad=10)
+
+                    # center + size
+                    aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                                (RF_df['ROI'] == roi2plot) & \
+                                                (RF_df['sj'] == pp) & \
+                                                (RF_df['RF_r2'] > 0) & \
+                                                (RF_df['slope'] > 0) & \
+                                                ((RF_df['movement_region'] == name))], 
+                                    x = 'center', y = 'coordinates', hue = 'size', palette = 'magma_r', 
+                                    ax = axs[1][0], hue_norm = (0,4))
+                    axs[1][0].set_ylim(-20,20) 
+                    axs[1][0].set_xlim(-.5, 4.5)
+                    axs[1][0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1][0].set_xlabel('RF center', fontsize=15, labelpad=10)
+                    aa.get_legend().remove()
+                    sm = plt.cm.ScalarMappable(cmap= 'magma_r', norm=plt.Normalize(-.5, 4.5))
+                    sm.set_array([])
+                    aa.figure.colorbar(sm)
+
+                    # both hands
+                    aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                            (RF_df['ROI'] == roi2plot) & \
+                                            (RF_df['sj'] == pp) & \
+                                            (RF_df['RF_r2'] > 0) & \
+                                            (RF_df['slope'] > 0) & \
+                                            ((RF_df['movement_region'] == 'both_hand'))], 
+                                    x = 'center', y = 'coordinates', hue = 'center', palette = cmap_hands, 
+                                    ax = axs[0][1], hue_norm = (0,4))
+                    
+                    axs[0][1].legend(loc='upper left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['both_hand'][l]) for l in range(5)])
+                    axs[0][1].set_ylim(-20,20) 
+                    axs[0][1].set_xlim(-.5, 4.5)
+                    axs[0][1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0][1].set_xlabel('RF center', fontsize=15, labelpad=10)
+                    axs[0][1].set_title('Both Hand', fontsize=20)
+                    
+                    # center + size
+                    aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                                (RF_df['ROI'] == roi2plot) & \
+                                                (RF_df['sj'] == pp) & \
+                                                (RF_df['RF_r2'] > 0) & \
+                                                (RF_df['slope'] > 0) & \
+                                                ((RF_df['movement_region'] == 'both_hand'))], 
+                                    x = 'center', y = 'coordinates', hue = 'size', palette = 'magma_r', 
+                                    ax = axs[1][1], hue_norm = (0,4))
+                    axs[1][1].set_ylim(-20,20) 
+                    axs[1][1].set_xlim(-.5, 4.5)
+                    axs[1][1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1][1].set_xlabel('RF center', fontsize=15, labelpad=10)
+                    aa.get_legend().remove()
+
+                    # face
+                    aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                            (RF_df['ROI'] == roi2plot) & \
+                                            (RF_df['sj'] == pp) & \
+                                            (RF_df['RF_r2'] > 0) & \
+                                            (RF_df['slope'] > 0) & \
+                                            ((RF_df['movement_region'] == 'face'))], 
+                                    x = 'center', y = 'coordinates', hue = 'center', palette = cmap_face, 
+                                    ax = axs[0][2], hue_norm = (0,3))
+                    
+                    axs[0][2].legend(loc='lower left',fontsize=5, 
+                                handles = [mpatches.Patch(color = cmap_face(int(256/3*l)), 
+                                label = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts']['face'][l]) for l in range(4)])
+                    axs[0][2].set_ylim(-50,0)
+                    axs[0][2].set_xlim(-.5, 3.5)
+                    axs[0][2].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[0][2].set_xlabel('RF center', fontsize=15, labelpad=10)
+                    axs[0][2].set_title('Face', fontsize=20)
+
+                    # center + size
+                    aa = sns.scatterplot(data = RF_df[(RF_df['hemisphere'] == hemi) & \
+                                                (RF_df['ROI'] == roi2plot) & \
+                                                (RF_df['sj'] == pp) & \
+                                                (RF_df['RF_r2'] > 0) & \
+                                                (RF_df['slope'] > 0) & \
+                                                ((RF_df['movement_region'] == 'face'))], 
+                                    x = 'center', y = 'coordinates', hue = 'size', palette = 'magma_r', 
+                                    ax = axs[1][2], hue_norm = (0,4))
+                    axs[1][2].set_ylim(-50,0)
+                    axs[1][2].set_xlim(-.5, 3.5)
+                    axs[1][2].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
+                    axs[1][2].set_xlabel('RF center', fontsize=15, labelpad=10)
+                    aa.get_legend().remove()
+
+                    fig.savefig(fig_name.replace('.png', '_scatter_hemisphere-{h}_{roi_name}.png'.format(roi_name = roi2plot, 
+                                                                                                        h = hemi)), 
                                 dpi=100,bbox_inches = 'tight')
 
-                    ##### plot figure - binned
-                    fig, axs = plt.subplots(1, 2, figsize=(12,4))
-
-                    region = 'left_hand'
-                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                                         'coords': roi_coords[hemi][1][mask_bool], 
-                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
-                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
-                                                           weight_key = 'r2', n_bins = n_bins)
-                    axs[0].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
-                    axs[0].set_xlim(-20,20) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
-                    axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-                    axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
-                    axs[0].set_title('Left Hand', fontsize=20)
-
-                    region = 'both_hand'
-                    binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                                         'coords': roi_coords[hemi][1][mask_bool], 
-                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
-                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
-                                                           weight_key = 'r2', n_bins = n_bins)
-                    axs[1].scatter(binned_coord, binned_com, c=binned_com,cmap = 'rainbow_r')
-                    axs[1].set_xlim(-20,20) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
-                    axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-                    axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
-                    axs[1].set_title('Both Hand', fontsize=20)
-                    fig.savefig(fig_name.replace('.png', '_binned_hands_RH_{roi_name}.png'.format(roi_name = roi2plot)), 
-                                dpi=100,bbox_inches = 'tight')
-
-            ### FOR FACE - BOTH HEMISPHERES
-
-            ##### plot figure - scatter
-            fig, axs = plt.subplots(1, 2, figsize=(12,4))
-
-            region = 'face'
-            hemi = 'LH'
-            ## fixed effects mask * positive CV-r2
-            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-            axs[0].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
-                        roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
-                    c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool] , cmap = cmap)
-            axs[0].set_ylim(-50,0) #axs[0].set_ylim(-20,15)
-            axs[0].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-            axs[0].set_xlabel('Betas COM', fontsize=15, labelpad=10)
-            axs[0].set_title('Face Left Hemisphere', fontsize=20)
-
-            hemi = 'RH'
-            ## fixed effects mask * positive CV-r2
-            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-            axs[1].scatter(COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool],
-                        roi_coords[hemi][1][mask_bool], alpha=r2[roi_vertices[hemi]][mask_bool],
-                    c = COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], cmap = cmap)
-            axs[1].set_ylim(-50,0) #axs[0].set_ylim(-20,15)
-            axs[1].set_ylabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-            axs[1].set_xlabel('Betas COM', fontsize=15, labelpad=10)
-            axs[1].set_title('Face Right Hemisphere', fontsize=20)
-            fig.savefig(fig_name.replace('.png', '_scatter_face_{roi_name}.png'.format(roi_name = roi2plot)), 
-                        dpi=100,bbox_inches = 'tight')
-
-            ##### plot figure - binned
-            fig, axs = plt.subplots(1, 2, figsize=(12,4))
-
-            hemi = 'LH'
-            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-            binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                                         'coords': roi_coords[hemi][1][mask_bool], 
-                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
-                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
-                                                           weight_key = 'r2', n_bins = n_bins)
-            axs[0].scatter(binned_coord, binned_com, c=binned_com, cmap = cmap)
-            axs[0].set_xlim(-50,0) #axs[0].set_ylim(-15,20) #axs[0].set_ylim(-20,15)
-            axs[0].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-            axs[0].set_ylabel('Betas COM', fontsize=15, labelpad=10)
-            axs[0].set_title('Face Left Hemisphere', fontsize=20)
-
-            hemi = 'RH'
-            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
-            binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': COM(region_betas_dict[region][:,roi_vertices[hemi]])[mask_bool], 
-                                                                         'coords': roi_coords[hemi][1][mask_bool], 
-                                                                         'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
-                                                           x_key = 'com', y_key = 'coords', sort_key = 'coords',
-                                                           weight_key = 'r2', n_bins = n_bins)
-            axs[1].scatter(binned_coord, binned_com, c=binned_com, cmap = cmap)
-            axs[1].set_xlim(-50,0) #axs[1].set_ylim(-15,20) #axs[1].set_ylim(-20,15)
-            axs[1].set_xlabel('y coordinates (a.u.)', fontsize=15, labelpad=10)
-            axs[1].set_ylabel('Betas COM', fontsize=15, labelpad=10)
-            axs[1].set_title('Face Right Hemisphere', fontsize=20)
-            fig.savefig(fig_name.replace('.png', '_binned_face_{roi_name}.png'.format(roi_name = roi2plot)), 
-                        dpi=100,bbox_inches = 'tight')
 
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
                                     n_bins = 256, custom_dm = True, keep_b_evs = False,
@@ -1362,7 +1463,7 @@ class somaViewer(Viewer):
                                 fig_abs_name = op.join(fig_pth, 
                                 'COM_flatmap_region-upper_limb_{s}hand_{r}.png'.format(s=side,r = region)))
                 
-    def get_COM_df(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
+    def get_COM_coords_df(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
                                 nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 40, z_threshold = 3.1,
                                 all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
                                 all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
@@ -1399,7 +1500,7 @@ class somaViewer(Viewer):
         output_df = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'coordinates': [],
                                 'COM': [], 'r2': [], 'movement_region': []})
         output_df_binned = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'coordinates': [],
-                                'COM': [], 'movement_region': []})
+                                'coordinates_std': [], 'COM': [], 'COM_std': [], 'movement_region': []})
 
         ## load atlas ROI df
         self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
@@ -1513,7 +1614,7 @@ class somaViewer(Viewer):
                                         ),ignore_index=True)
                             
                             # calculate weighted bins
-                            binned_com, _, binned_coord, _ = self.get_weighted_mean_bins(pd.DataFrame({'com': com_vals, 
+                            binned_com, binned_com_std, binned_coord, binned_coord_std = self.get_weighted_mean_bins(pd.DataFrame({'com': com_vals, 
                                                                          'coords': roi_coords[hemi][1][mask_bool], 
                                                                          'r2': weight_arr[roi_vertices[hemi]][mask_bool]}), 
                                                            x_key = 'com', y_key = 'coords', sort_key = 'coords',
@@ -1526,12 +1627,157 @@ class somaViewer(Viewer):
                                                                 'hemisphere': np.tile(hemi, len(binned_com)), 
                                                                 'movement_region': np.tile(region, len(binned_com)),
                                                                 'coordinates': binned_coord,
-                                                                'COM': binned_com})
+                                                                'coordinates_std': binned_coord_std,
+                                                                'COM': binned_com,
+                                                                'COM_std': binned_com_std})
                                         ),ignore_index=True)
 
         return output_df, output_df_binned
 
-        
+    def get_RF_coords_df(self, participant_list, data_RFmodel = None,
+                                fit_type = 'loo_run', keep_b_evs = True,
+                                roi2plot_list = ['M1', 'S1'], z_threshold = 3.1,
+                                all_regions = ['face', 'left_hand', 'right_hand', 'both_hand'],
+                                all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
+                                'BA43': ['43', 'OP4'], 'S2': ['OP1'],
+            'Insula': ['52', 'PI', 'Ig', 'PoI1', 'PoI2', 'FOP2', 'FOP3','MI', 'AVI', 'AAIC']
+            }):
+
+        """
+        Helper function to get RF values over y axis 
+        (for all relevant vertices and also binned)
+        for each movement region of interest
+        and for selected ROIs.
+        Returns df with info
+
+        Parameters
+        ----------
+        participant: str
+            participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)
+        roi2plot_list: list
+            list with ROI names to plot
+        all_regions: list
+            with movement region name 
+        all_rois: dict
+            dictionary with names of ROIs and and list of glasser atlas labels  
+        n_bins: int
+            number of y coord bins to divide COM values into
+        """
+
+        ## store all COM values but also the binned version
+        output_df = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'coordinates': [],
+                                'center': [], 'size': [], 'slope': [], 'RF_r2': [], 'r2': [], 'movement_region': []})
+
+        ## load atlas ROI df
+        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+
+        ## use CS as major axis for ROI coordinate rotation
+        ref_theta = self.somaModelObj.get_rotation_angle(self.somaModelObj.atlas_df, 
+                                            roi_list = self.somaModelObj.MRIObj.params['plotting']['soma']['reference_roi'])
+
+        ## get surface x and y coordinates
+        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+                                                                        merge = True)
+
+        ## loop over participant list
+        for pp in participant_list:
+            
+            ## LOAD R2
+            if fit_type == 'loo_run':
+                # get all run lists
+                run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(pp, 
+                                                    file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
+
+                ## get r2 values (all used in GLM)
+                _, r2_pp = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list)
+
+                # path where Region contrasts were stored
+                stats_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_stats', 
+                                                        'sub-{sj}'.format(sj = pp), 'fixed_effects', fit_type)
+
+                # load z-score localizer area, for region movements
+                region_mask = {}
+                region_mask['upper_limb'] = self.somaModelObj.load_zmask(region = 'upper_limb', filepth = stats_dir, 
+                                                            fit_type = fit_type, fixed_effects = True, 
+                                                            z_threshold = z_threshold, keep_b_evs = keep_b_evs)['B']
+                region_mask['face'] = self.somaModelObj.load_zmask(region = 'face', filepth = stats_dir, 
+                                                            fit_type = fit_type, fixed_effects = True, 
+                                                            z_threshold = z_threshold, keep_b_evs = keep_b_evs)
+                
+                ## get positive and relevant r2
+                r2_mask = np.zeros(r2_pp.shape)
+                r2_mask[r2_pp > 0] = 1
+            else:
+                # load GLM estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+                r2_pp = soma_estimates['r2']
+
+            ## load RF estimates
+            RF_estimates = data_RFmodel.load_estimates(pp, betas_model = 'glm', region_keys = all_regions,
+                                                            fit_type = fit_type)
+
+            ## set reg names in dict
+            ## for all relevant regions
+            region_regs_dict = {}
+            for region in all_regions:
+                region_regs_dict[region] = self.somaModelObj.MRIObj.params['fitting']['soma']['all_contrasts'][region]
+
+            ## make array of weights to use in bin
+            weight_arr = r2_pp.copy()
+            weight_arr[weight_arr<=0] = 0 # to not use negative weights
+
+            # for each roi, get values and store in DF
+            for roi2plot in roi2plot_list:
+
+                ## get FS coordinates for each ROI vertex
+                roi_vertices = {}
+                roi_coords = {}
+                for hemi in self.hemi_labels:
+                    roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                                                        roi_list = all_rois[roi2plot],
+                                                        hemi = hemi)
+                    ## get FS coordinates for each ROI vertex
+                    roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                                                                                            y_coord_surf[roi_vertices[hemi]])), 
+                                                                        fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
+                                                                        theta = ref_theta[hemi],
+                                                                        roi_name = roi2plot+'_'+hemi)
+
+                    # for each movement region
+                    for region in all_regions:
+                        
+                        ## fixed effects mask * positive CV-r2
+                        if region != 'face':
+                            mask_bool = ((~np.isnan(region_mask['upper_limb'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+                        else:
+                            mask_bool = ((~np.isnan(region_mask['face'][roi_vertices[hemi]]))*r2_mask[roi_vertices[hemi]]).astype(bool)
+
+                        if not ((hemi == 'LH') and (region == 'left_hand')) or \
+                            not ((hemi == 'RH') and (region == 'right_hand')):
+                            
+                            # append
+                            output_df = pd.concat((output_df,
+                                                    pd.DataFrame({'sj': np.tile(pp, len(roi_coords[hemi][1][mask_bool])), 
+                                                                'ROI': np.tile(roi2plot, len(roi_coords[hemi][1][mask_bool])), 
+                                                                'hemisphere': np.tile(hemi, len(roi_coords[hemi][1][mask_bool])), 
+                                                                'movement_region': np.tile(region, len(roi_coords[hemi][1][mask_bool])),
+                                                                'coordinates': roi_coords[hemi][1][mask_bool],
+                                                                'center': np.array(RF_estimates[region]['mu'])[roi_vertices[hemi]][mask_bool], 
+                                                                'size': np.array(RF_estimates[region]['size'])[roi_vertices[hemi]][mask_bool],
+                                                                'slope': np.array(RF_estimates[region]['slope'])[roi_vertices[hemi]][mask_bool],
+                                                                'RF_r2': np.array(RF_estimates[region]['r2'])[roi_vertices[hemi]][mask_bool],
+                                                                'r2': r2_pp[roi_vertices[hemi]][mask_bool]})
+                                        ),ignore_index=True)
+                            
+        return output_df
 
 class pRFViewer(Viewer):
 
