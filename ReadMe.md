@@ -1,10 +1,9 @@
-Repository for Visuomotor mapping within prefrontal cortex
 
 *Under Development*
 
 # Run An Experiment:
 To run the experiments, the package exptools needs to be installed (https://github.com/VU-Cog-Sci/exptools).
-In the terminal, go to the folder of the desired experiment. Then type ```python main.py <INITIALS>```, replacing `INITIALS` with your own (or the participants') initials.
+In the terminal, go to the folder of the desired experiment (experiments/<name>). Then type `python main.py <INITIALS>`, replacing `INITIALS` with your own (or the participants') initials.
 
 # Analysis
 
@@ -12,4 +11,4 @@ Structural images were first preprocessed by resorting to https://github.com/VU-
 
 pRF fitting was done through the package prfpy (https://github.com/VU-Cog-Sci/prfpy) 
 
-Analysis scripts were developed with Python 3.6
+Analysis scripts were developed with Python 3.8
