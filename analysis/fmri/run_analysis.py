@@ -24,34 +24,29 @@ CLI.add_argument("--subject",
                 required=True,
                 help = 'Subject number (ex:1). If "all" will run for all participants. If list of subs, will run only those (ex: 1 2 3 4)'
                 )
-
 CLI.add_argument("--system",
                 #nargs="*",
                 type=str,  # any type/callable can be used here
                 default = 'local',
                 help = 'Where are we running analysis? (ex: local, lisa). Default local'
                 )
-
 CLI.add_argument("--exclude",  # name on the CLI - drop the `--` for positional/required parameters
                 nargs="*",  # 0 or more values expected => creates a list
                 type=int,
                 default=[],  # default if nothing is provided
                 help = 'List of subs to exclude (ex: 1 2 3 4). Default []'
                 )
-
 CLI.add_argument("--cmd",
                 #nargs="*",
                 type=str,  # any type/callable can be used here
                 required=True,
                 help = 'What analysis to run?\n Options: postfmriprep, fit_prf, fit_glm, etc'
                 )
-
 CLI.add_argument("--task",
                 type=str,  # any type/callable can be used here
                 default = 'pRF',
                 help = 'What task we want to run? pRF [Default] vs soma'
                 )
-
 CLI.add_argument("--wf_dir", 
                     type = str, 
                     help="Path to workflow dir, if such if not standard root dirs(None [default] vs /scratch)")
@@ -86,6 +81,33 @@ CLI.add_argument("--model2fit",
                 default = 'gauss',
                 help="pRF/soma model name to fit [gauss, css, glm, glmsingle, somaRF]")
 
+# other options
+CLI.add_argument("--data_type", 
+                type = str, 
+                default = 'anat',
+                help="Data type to run fmriprep/mriqc")
+
+# options for SLURM systems
+CLI.add_argument("--node_name", 
+                type = str, 
+                help="Node name, to send job to [default None]")
+CLI.add_argument("--partition_name", 
+                type = str, 
+                help="Partition name, to send job to [default None]")
+CLI.add_argument("--batch_mem_Gib", 
+                type = int, 
+                default = 90,
+                help="Node memory limit [default 90]")
+CLI.add_argument("--email", 
+                type = int, 
+                default = 0,
+                help="Send job email 1/0 [default 0]")
+CLI.add_argument("--hours", 
+                type = int, 
+                default = 10,
+                help="Number of hours to set as time limit for job")
+
+
 # parse the command line
 args = CLI.parse_args()
 
@@ -109,6 +131,17 @@ chunk_num = args.chunk_num
 vertex = args.vertex
 ROI = args.ROI
 
+## slurm options
+node_name = args.node_name
+partition_name = args.partition_name
+batch_mem_Gib = args.batch_mem_Gib
+hours = args.hours
+run_time = '{h}:00:00'.format(h = str(hours)) #'10:00:00'
+send_email = bool(args.email)
+
+## fmriprep/mriqc options
+data_type = args.data_type
+
 ## Load MRI object
 Visuomotor_data = MRIData(params, sj, 
                         base_dir = system_dir, 
@@ -120,6 +153,13 @@ Visuomotor_data = MRIData(params, sj,
 if py_cmd == 'postfmriprep':
 
     Visuomotor_data.post_fmriprep_proc()
+
+elif py_cmd == 'fmriprep':
+
+    Visuomotor_data.call_fmriprep(data_type = data_type,
+                     partition_name = partition_name, node_name = node_name,
+                     root_folder = Visuomotor_data.params['general']['paths'][Visuomotor_data.base_dir]['test'],
+                     node_mem = 5000, batch_mem_Gib = batch_mem_Gib, run_time = run_time)
 
 # if running prf analysis
 if task in ['pRF', 'prf']:

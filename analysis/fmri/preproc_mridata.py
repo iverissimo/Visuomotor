@@ -157,7 +157,134 @@ class MRIData(BehData):
         self.file_ext = self.params['processing']['file_ext'] # file extension
         self.crop_TR = self.params['processing']['crop_TR']
         self.hemispheres = ['hemi-L','hemi-R']
- 
+
+    def call_fmriprep(self, data_type='anat', wf_dir = '/scratch/Visuomotor_wf', batch_dir ='/home/inesv/batch',
+                     partition_name = None, node_name = None, use_fmap = True, low_mem = True, 
+                     root_folder = '/project/projects_verissimo/Visuomotor_test',
+                     node_mem = 5000, batch_mem_Gib = 90, run_time = '50:00:00'):
+        
+        """
+        Run FMRIPREP on anat or functional data
+        
+        NOTE - needs to be run in slurm system!!
+        
+        Parameters
+        ----------
+        data_type : str
+            if we want to run it on 'anat' or 'func'
+        wf_dir : str
+            workflow directory (only relevant for slurm)
+        batch_dir: str
+            path to store .sh jobs, for later check of what was actually ran
+        """ 
+
+        # loop over participants
+        for pp in self.sj_num:
+
+            fmriprep_cmd = """#!/bin/bash
+#SBATCH -t $RUNTIME
+#SBATCH -N 1
+#SBATCH -v
+#SBATCH --output=$BD/slurm_Visuomotor_FMRIPREP_%A.out\n"""
+            
+            if partition_name is not None:
+                fmriprep_cmd += '#SBATCH --partition {p}\n'.format(p=partition_name)
+            if node_name is not None:
+                fmriprep_cmd += '#SBATCH -w {n}\n'.format(n=node_name)
+            
+            # add memory for node
+            fmriprep_cmd += '#SBATCH --mem={mem}G\n'.format(mem=batch_mem_Gib)
+
+            if data_type == 'anat':
+                
+                fmriprep_cmd +="""\n# call the programs
+echo "Job $SLURM_JOBID started at `date`"
+
+# make working directory in node
+mkdir $WF_DIR
+
+wait
+
+PYTHONPATH="" singularity run --cleanenv -B /project/projects_verissimo -B $WF_DIR \
+$SINGIMG \
+$ROOTFOLDER/sourcedata $ROOTFOLDER/derivatives/fmriprep/ participant \
+--participant-label $SJ_NR --fs-subjects-dir $ROOTFOLDER/derivatives/freesurfer/ \
+--output-space T1w \
+--nthread 16 --mem_mb 5000 --low-mem --fs-license-file $FREESURFER/license.txt \
+--anat-only \
+-w $WF_DIR
+
+wait          # wait until programs are finished
+
+echo "Job $SLURM_JOBID finished at `date`"
+"""
+            else:
+                
+                fmriprep_cmd +="""# call the programs
+echo "Job $SLURM_JOBID started at `date`"
+
+# make working directory in node
+mkdir $WF_DIR
+
+wait
+
+PYTHONPATH="" singularity run --cleanenv -B /project/projects_verissimo -B $WF_DIR \
+$SINGIMG \
+$ROOTFOLDER/sourcedata $ROOTFOLDER/derivatives/fmriprep/ participant \
+--participant-label $SJ_NR --fs-subjects-dir $ROOTFOLDER/derivatives/freesurfer/ \
+--output-space T1w fsnative fsaverage MNI152NLin2009cAsym \
+--bold2t1w-init register --nthread 16 --mem_mb $MEM $LM\
+--fs-license-file $FREESURFER/license.txt \
+$FMAP_CMD --bold2t1w-dof 6 --stop-on-first-crash \
+--verbose --skip_bids_validation \
+-w $WF_DIR 
+
+wait          # wait until programs are finished
+
+echo "Job $SLURM_JOBID finished at `date`"
+"""
+
+            # type of fieldmap pipeline we are doing
+            if use_fmap:
+                fmap_cmd = '--use-syn-sdc --force-syn'  
+            else:  
+                fmap_cmd = '--use-syn-sdc --ignore fieldmaps'
+
+            # if we want to reduce memory usage - which might impact disk space though
+            if low_mem:
+                low_mem = '--low-mem '
+            else:
+                low_mem = ''
+            
+            #os.chdir(batch_dir)
+            batch_string = fmriprep_cmd
+
+            keys2replace = {'$SJ_NR': 'sub-{sj}'.format(sj=pp),
+                            '$SINGIMG': op.join(self.params['general']['paths'][self.base_dir]['singularity'], 
+                                                self.params['processing']['fmriprep_sing']),
+                            '$ROOTFOLDER': root_folder,
+                            '$WF_DIR': wf_dir,
+                            '$BD': batch_dir,
+                            '$FMAP_CMD': fmap_cmd,
+                            '$MEM': str(node_mem),
+                            '$LM': low_mem,
+                            '$RUNTIME': run_time
+                             }
+
+            # replace all key-value pairs in batch string
+            for key, value in keys2replace.items():
+                batch_string = batch_string.replace(key, value)
+
+            # run it
+            js_name = op.join(batch_dir, 'FMRIPREP_sub-{sj}_Visuomotor_{data}.sh'.format(sj=pp, data=data_type))
+            of = open(js_name, 'w')
+            of.write(batch_string)
+            of.close()
+
+            print('submitting ' + js_name + ' to queue')
+            #print(batch_string)
+            os.system('sbatch ' + js_name)
+
 
     def post_fmriprep_proc(self):
 

@@ -21,6 +21,8 @@ general:
     lisa:
       root: '/project/projects_verissimo/Visuomotor_data'
       batch: '/home/inesv/batch'
+      singularity: '/home/inesv/my_images'
+      test: '/project/projects_verissimo/Visuomotor_test'
 prf:
   PRF_ITI_in_TR: 0.5
   bar_pass_in_TRs:
@@ -46,6 +48,9 @@ soma:
 processing:
   space: 'fsaverage' #'T1w'
   file_ext: '.func.gii'
+
+  fmriprep_sing: 'fmriprep.22.1.1.simg' # fmriprep singularity image name
+  mriqc_sing: 'mriqc-0.15.1.simg' # mriqc singularity image name
 
   crop_TR: 
     soma: 0
