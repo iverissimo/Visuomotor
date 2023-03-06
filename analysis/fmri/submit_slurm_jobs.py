@@ -11,10 +11,6 @@ with open(op.join(op.split(os.getcwd())[0],'params.yml'), 'r') as f_in:
     params = yaml.safe_load(f_in)
 
 from preproc_mridata import MRIData
-from soma_model import GLMsingle_Model, GLM_Model
-from prf_model import prfModel
-
-from viewer import somaViewer
 
 # defined command line options
 # this also generates --help and error handling

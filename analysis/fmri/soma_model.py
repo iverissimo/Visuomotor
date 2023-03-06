@@ -303,7 +303,7 @@ class somaModel:
         """
 
         if annot_pth is None:
-            annot_pth = op.join(self.MRIObj.derivatives_pth, 'Glasser_et_al_2016_HCP_MMP1.0_qN_RVVG',
+            annot_pth = op.join(self.MRIObj.derivatives_pth, 'atlas', 'Glasser_et_al_2016_HCP_MMP1.0_qN_RVVG',
                             'HCP_PhaseTwo', 'Q1-Q6_RelatedParcellation210','MNINonLinear','fsaverage_LR32k')
 
         # make empty rgb dict (although we might not use it)

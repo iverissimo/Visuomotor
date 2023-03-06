@@ -126,7 +126,6 @@ class visualize_on_click:
 
                     design_matrix = self.SomaModelObj.make_custom_dm(events_avg, 
                                                         osf = 100, data_len_TR = self.soma_prediction.shape[-1], 
-                                                        TR = self.SomaModelObj.MRIObj.TR, 
                                                         hrf_params = self.SomaModelObj.MRIObj.params['fitting']['soma']['hrf_params'], 
                                                         hrf_onset = self.SomaModelObj.MRIObj.params['fitting']['soma']['hrf_onset'])
                     hrf_model = 'custom'
