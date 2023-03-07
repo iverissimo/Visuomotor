@@ -1808,6 +1808,56 @@ class pRFViewer(Viewer):
         else:
             self.outputdir = outputdir
 
+    def get_estimates_roi_df(self, participant, estimates_pp, ROIs = None, roi_verts = None, est_key = 'r2', model = 'gauss'):
+
+        """
+        Helper function to get estimates dataframe values for each ROI
+        will select values based on est key param 
+        """
+
+        ## save rsq values in dataframe, for plotting
+        df_est = pd.DataFrame({'sj': [], 'index': [], 'ROI': [], 'value': [], 'model': []})
+
+        for idx,rois_ks in enumerate(ROIs): 
+            
+            # mask estimates
+            print('masking estimates for ROI %s'%rois_ks)
+
+            if len(roi_verts[rois_ks]) > 0:
+                if isinstance(estimates_pp, dict):
+                    roi_arr = estimates_pp[est_key][roi_verts[rois_ks]]
+                else:
+                    roi_arr = estimates_pp[roi_verts[rois_ks]]
+            else:
+                print('No vertices found for ROI')
+                roi_arr = [np.nan]
+
+            df_est = pd.concat((df_est,
+                                pd.DataFrame({'sj': np.tile('sub-{sj}'.format(sj = participant), len(roi_arr)), 
+                                            'index': roi_verts[rois_ks], 
+                                            'ROI': np.tile(rois_ks, len(roi_arr)), 
+                                            'value': roi_arr,
+                                            'model': np.tile(model, len(roi_arr))})
+                            ))
+
+        return df_est
+
+    def get_ROI_verts_dict(self):
+
+        """
+        Helper function to get pRF ROI vertices
+        to be used in plotting
+        """
+
+        # get vertices for subject fsaverage
+        ROIs = self.pRFModelObj.MRIObj.params['plotting']['prf']['ROIs']
+
+        roi_verts = {} #empty dictionary  
+        for _,val in enumerate(ROIs):
+            roi_verts[val] = cortex.get_roi_verts(self.pysub,val)[val]
+
+        return roi_verts
+
 
     def plot_vertex_tc(self, participant, vertex = None, run_type = 'mean_run', fit_now = True,
                             model2fit = 'gauss', chunk_num = None, ROI = None, fit_hrf = False):
@@ -1872,7 +1922,7 @@ class pRFViewer(Viewer):
 
 
     def plot_prf_results(self, participant_list = [], 
-                                fit_type = 'mean_run', prf_model_name = 'gauss', max_ecc_ext = 5,
+                                fit_type = 'mean_run', prf_model_name = 'gauss', max_ecc_ext = None,
                                 mask_arr = True, rsq_threshold = .1, iterative = True, figures_pth = None):
 
 
@@ -1913,11 +1963,109 @@ class pRFViewer(Viewer):
                 group_estimates['sub-{sj}'.format(sj = pp)] = pp_prf_est_dict
 
 
-        ## Now actually plot results
-        # 
-        ### RSQ ###
-        # self.plot_rsq(participant_list = participant_list, group_estimates = group_estimates, ses = ses, run_type = run_type,
-        #                                     model_name = prf_model_name, figures_pth = figures_pth)
+        # Now actually plot results
+         
+        ## RSQ ###
+        self.plot_rsq(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
+                                            model_name = prf_model_name, figures_pth = figures_pth)
+
+    def plot_rsq(self, participant_list = [], group_estimates = [], figures_pth = None, 
+                        model_name = 'gauss', fit_type = 'mean_run'):
+
+        """
+        Plot rsq - flatmap and violinplot for ROIs
+        for all participants in list
+        """
+
+        ## get ROI vertices
+        roi_verts = self.get_ROI_verts_dict()
+
+        # make output folder for figures
+        if figures_pth is None:
+            figures_pth = op.join(self.outputdir, 'rsq', 'pRF', fit_type)
+        
+        # save values per roi in dataframe
+        avg_roi_df = pd.DataFrame()
+
+        ## loop over participants in list
+        for pp in participant_list:
+            
+            # make path to save sub-specific figures
+            sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
+            os.makedirs(sub_figures_pth, exist_ok=True)
+
+            fig_name = op.join(sub_figures_pth, 'sub-{sj}_task-pRF_model-{model}_flatmap_RSQ.png'.format(sj = pp,
+                                                                                                    model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(group_estimates['sub-{sj}'.format(sj = pp)]['r2'], 
+                                                        vmin1 = 0, vmax1 = .7,
+                                                        cmap = 'hot',
+                                                        fig_abs_name = fig_name)
+            
+            ## for each participant, get dataframe with 
+            # estimate value per ROI
+            df_estimates_ROIs = self.get_estimates_roi_df(pp, group_estimates['sub-{sj}'.format(sj = pp)], 
+                                                         ROIs = roi_verts.keys(), 
+                                                        roi_verts = roi_verts, 
+                                                        est_key = 'r2', model = model_name)
+            
+            ## plot violinplot
+            fig, ax1 = plt.subplots(1,1, figsize=(20,7.5), dpi=100, facecolor='w', edgecolor='k')
+            v1 = sns.violinplot(data = df_estimates_ROIs, x = 'ROI', y = 'value', 
+                                cut=0, inner='box', palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
+                                linewidth=2.7,saturation = 1, ax = ax1) 
+            # change alpha
+            plt.setp(v1.collections, alpha=.7, edgecolor = None)
+                    
+            v1.set(xlabel=None)
+            v1.set(ylabel=None)
+            plt.margins(y=0.025)
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+
+            plt.xlabel('ROI',fontsize = 20,labelpad=18)
+            plt.ylabel('RSQ',fontsize = 20,labelpad=18)
+            plt.ylim(0,1)
+            fig.savefig(fig_name.replace('flatmap','violinplot'))
+            
+            ## concatenate average per participant, to make group plot
+            avg_roi_df = pd.concat((avg_roi_df,
+                                    df_estimates_ROIs))
+            
+        # if we provided several participants, make group plot
+        if len(participant_list) > 1:
+
+            fig, ax1 = plt.subplots(1,1, figsize=(20,7.5), dpi=100, facecolor='w', edgecolor='k')
+
+            # point plot with group average and standard error of the mean
+            v1 = sns.pointplot(data = avg_roi_df, x = 'ROI', y = 'value', 
+                        palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
+                        errorbar = 'se', ax=ax1, scale=2, capsize = .2) 
+            # change alpha
+            plt.setp(v1.collections, alpha=.7, edgecolor = None)
+
+            # striplot with median value for all participants
+            sns.stripplot(data = avg_roi_df.groupby(['sj', 'ROI'])['value'].median().reset_index(),
+                        x = 'ROI', y = 'value', order = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'].keys(),
+                        color = 'gray', alpha = 0.3,linewidth=.2, edgecolor='k',ax=ax1)
+
+            v1.set(xlabel=None)
+            v1.set(ylabel=None)
+            plt.margins(y=0.025)
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+
+            plt.xlabel('ROI',fontsize = 20,labelpad=18)
+            plt.ylabel('RSQ',fontsize = 20,labelpad=18)
+            plt.ylim(0,1)
+
+            fig_name = op.join(sub_figures_pth, 'sub-group_task-pRF_model-{model}_pointplot_RSQ.png'.format(model = model_name))
+            fig.savefig(fig_name)
+
 
 
     def open_click_viewer(self, participant, fit_type = 'mean_run', prf_model_name = 'gauss', 
@@ -2064,37 +2212,4 @@ class pRFViewer(Viewer):
         plt.show()
 
 
-    def get_flatmaps(self, est_arr1, est_arr2 = None, 
-                            vmin1 = 0, vmax1 = .8, vmin2 = None, vmax2 = None,
-                            cmap = 'BuBkRd'):
-
-        """
-        Helper function to set and return flatmap  
-        Parameters
-        ----------
-        est_arr1 : array
-            data array
-        cmap : str
-            string with colormap name
-        vmin: int/float
-            minimum value
-        vmax: int/float 
-            maximum value
-        subject: str
-            overlay subject name to use
-        """
-
-        # if two arrays provided, then fig is 2D
-        if est_arr2:
-            flatmap = cortex.Vertex2D(est_arr1, est_arr2,
-                                    self.pysub,
-                                    vmin = vmin1, vmax = vmax1,
-                                    vmin2 = vmin2, vmax2 = vmax2,
-                                    cmap = cmap)
-        else:
-            flatmap = cortex.Vertex(est_arr1, 
-                                    self.pysub,
-                                    vmin = vmin1, vmax = vmax1,
-                                    cmap = cmap)
-
-        return flatmap
+    

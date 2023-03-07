@@ -98,7 +98,13 @@ if task in ['pRF', 'prf']:
 
         plotter.open_click_viewer(Visuomotor_data.sj_num[0], fit_type = run_type, 
                                             prf_model_name = model_name, 
-                                            mask_arr = False, rsq_threshold = .14)
+                                            mask_arr = True, rsq_threshold = .2)
+        
+    elif py_cmd == 'prf_estimates':
+
+        plotter.plot_prf_results(participant_list = Visuomotor_data.sj_num, 
+                                fit_type = run_type, prf_model_name = model_name,
+                                mask_arr = True, rsq_threshold = .2, iterative = True)
 
 elif task == 'soma':
 
