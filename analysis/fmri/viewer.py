@@ -129,10 +129,49 @@ class Viewer:
             surface_arr1 = est_arr1
             surface_arr2 = est_arr2
 
-        flatmap = self.get_flatmaps(surface_arr1, est_arr2 = surface_arr2, 
-                            vmin1 = vmin1, vmax1 = vmax1, vmin2 = vmin2, vmax2 = vmax2,
-                            cmap = cmap)
+        if isinstance(cmap, str):
+            flatmap = self.get_flatmaps(surface_arr1, est_arr2 = surface_arr2, 
+                                vmin1 = vmin1, vmax1 = vmax1, vmin2 = vmin2, vmax2 = vmax2,
+                                cmap = cmap)
+        else:
+            if surface_arr2 is None:
+                data2D = False
+            else:
+                data2D = True
+            flatmap = self.make_raw_vertex_image(surface_arr1, 
+                                                cmap = cmap, 
+                                                vmin = vmin1, vmax = vmax1, 
+                                                data2 = surface_arr2, 
+                                                vmin2 = vmin2, vmax2 = vmax2, 
+                                                subject = self.pysub, data2D = data2D)
         
+        # if we provide absolute name for figure, then save there
+        if fig_abs_name is not None:
+
+            fig_pth = op.split(fig_abs_name)[0]
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+
+            print('saving %s' %fig_abs_name)
+            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=False,with_colorbar=True,
+                                                with_curvature=True,with_sulci=True,with_labels=False,
+                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+        else:
+            cortex.quickshow(flatmap, recache=False,with_colorbar=True,
+                                    with_curvature=True,with_sulci=True,with_labels=False,
+                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+            
+    def plot_RGBflatmap(self, rgb_arr = [], alpha_arr = None, fig_abs_name = None):
+
+        """
+        plot RGB flatmap
+        """
+
+        flatmap = cortex.VertexRGB(rgb_arr[:, 0], rgb_arr[:, 1], rgb_arr[:, 2],
+                                alpha = alpha_arr, 
+                                subject = self.pysub)
+        
+
         # if we provide absolute name for figure, then save there
         if fig_abs_name is not None:
 
@@ -1808,6 +1847,144 @@ class pRFViewer(Viewer):
         else:
             self.outputdir = outputdir
 
+    def plot_pa_colorwheel(self, resolution=800, angle_thresh = 3*np.pi/4, cmap_name = 'hsv', continuous = True, fig_name = None):
+
+        """
+        Helper function to create colorwheel image
+        for polar angle plots returns 
+        Parameters
+        ----------
+        resolution : int
+            resolution of mesh
+        angle_thresh: float
+            value upon which to make it red for this hemifield (above angle or below 1-angle will be red in a retinotopy hsv color wheel)
+            if angle threh different than PI then assumes non uniform colorwheel
+        cmap_name: str/list
+            colormap name (if string) or list of colors to use for colormap
+        continuous: bool
+            if continuous colormap or binned
+        """
+
+        ## make circle
+        circle_x, circle_y = np.meshgrid(np.linspace(-1, 1, resolution), np.linspace(-1, 1, resolution))
+        circle_radius = np.sqrt(circle_x**2 + circle_y**2)
+        circle_pa = np.arctan2(circle_y, circle_x) # all polar angles calculated from our mesh
+        circle_pa[circle_radius > 1] = np.nan # then we're excluding all parts of bitmap outside of circle
+
+        if isinstance(cmap_name, str):
+
+            cmap = plt.get_cmap('hsv')
+            norm = colors.Normalize(-angle_thresh, angle_thresh) # normalize between the point where we defined our color threshold
+        
+        elif isinstance(cmap_name, list) or isinstance(cmap_name, np.ndarray):
+
+            if continuous:
+                cvals  = np.arange(len(cmap_name))
+                norm = plt.Normalize(min(cvals),max(cvals))
+                tuples = list(zip(map(norm,cvals), cmap_name))
+                
+                colormap = colors.LinearSegmentedColormap.from_list("", tuples)
+                norm = colors.Normalize(-angle_thresh, angle_thresh) 
+
+            else:
+                colormap = colors.ListedColormap(cmap_name)
+                #boundaries = np.linspace(0,1,len(cmap_name))
+                #norm = colors.BoundaryNorm(boundaries, colormap.N, clip=True)
+                norm = colors.Normalize(-angle_thresh, angle_thresh) 
+
+        # non-uniform colorwheel
+        if angle_thresh != np.pi:
+            
+            ## for LH (RVF)
+            circle_pa_left = circle_pa.copy()
+            # between thresh angle make it red
+            circle_pa_left[(circle_pa_left < -angle_thresh) | (circle_pa_left > angle_thresh)] = angle_thresh
+
+            plt.imshow(circle_pa_left, cmap=cmap, norm=norm,origin='lower') # origin lower because imshow flips it vertically, now in right order for VF
+            plt.axis('off')
+
+            plt.savefig('{fn}_colorwheel_4LH-RVF.png'.format(fn = fig_name),dpi=100)
+
+            ## for RH (LVF)
+            circle_pa_right = circle_pa.copy()
+            circle_pa_right = np.fliplr(circle_pa_right)
+            # between thresh angle make it red
+            circle_pa_right[(circle_pa_right < -angle_thresh) | (circle_pa_right > angle_thresh)] = angle_thresh
+
+            plt.imshow(circle_pa_right, cmap=cmap, norm=norm,origin='lower')
+            plt.axis('off')
+
+            plt.savefig('{fn}_colorwheel_4RH-LVF.png'.format(fn = fig_name),dpi=100)
+
+        else:
+            plt.imshow(circle_pa, cmap = colormap, norm=norm, origin='lower')
+            plt.axis('off')
+
+            if continuous:
+                plt.savefig('{fn}_colorwheel_continuous.png'.format(fn = fig_name),dpi=100)
+            else:
+                plt.savefig('{fn}_colorwheel_discrete.png'.format(fn = fig_name),dpi=100)
+
+    def get_NONuniform_polar_angle(self, xx = [], yy = [], rsq = [], angle_thresh = 3*np.pi/4, rsq_thresh = 0):
+
+        """
+        Helper function to transform polar angle values into RGB values
+        guaranteeing a non-uniform representation
+        (this is, when we want to use half the color wheel to show the pa values)
+        (useful for better visualization of boundaries)
+        Parameters
+        ----------
+        xx : arr
+            array with x position values
+        yy : arr
+            array with y position values
+        rsq: arr
+            rsq values, to be used as alpha level/threshold
+        angle_thresh: float
+            value upon which to make it red for this hemifield (above angle or below 1-angle will be red in a retinotopy hsv color wheel)
+        rsq_thresh: float/int
+            minimum rsq threshold to use 
+        pysub: str
+            name of pycortex subject folder
+        """
+
+        hsv_angle = []
+        hsv_angle = np.ones((len(rsq), 3))
+
+        ## calculate polar angle
+        polar_angle = np.angle(xx + yy * 1j)
+
+        ## set normalized polar angle (0-1), and make nan irrelevant vertices
+        hsv_angle[:, 0] = np.nan 
+        hsv_angle[:, 0][rsq > rsq_thresh] = ((polar_angle + np.pi) / (np.pi * 2.0))[rsq > rsq_thresh]
+
+        ## normalize angle threshold for overepresentation
+        angle_thresh_norm = (angle_thresh + np.pi) / (np.pi * 2.0)
+
+        ## get mid vertex index (diving hemispheres)
+        left_index = cortex.db.get_surfinfo(self.pysub).left.shape[0] 
+
+        ## set angles within threh interval to 0
+        ind_thresh = np.where((hsv_angle[:left_index, 0] > angle_thresh_norm) | (hsv_angle[:left_index, 0] < 1-angle_thresh_norm))[0]
+        hsv_angle[:left_index, 0][ind_thresh] = 0
+
+        ## now take angles from RH (thus LVF) 
+        #### ATENÇÃO -> minus sign to flip angles vertically (then order of colors same for both hemispheres) ###
+        # also normalize it
+        hsv_angle[left_index:, 0] = ((np.angle(-1*xx + yy * 1j) + np.pi) / (np.pi * 2.0))[left_index:]
+
+        # set angles within threh interval to 0
+        ind_thresh = np.where((hsv_angle[left_index:, 0] > angle_thresh_norm) | (hsv_angle[left_index:, 0] < 1-angle_thresh_norm))[0]
+        hsv_angle[left_index:, 0][ind_thresh] = 0
+
+        ## make final RGB array
+        rgb_angle = np.ones((len(rsq), 3))
+        rgb_angle[:] = np.nan
+
+        rgb_angle[rsq > rsq_thresh] = colors.hsv_to_rgb(hsv_angle[rsq > rsq_thresh])
+
+        return rgb_angle
+
     def get_estimates_roi_df(self, participant, estimates_pp, ROIs = None, roi_verts = None, est_key = 'r2', model = 'gauss'):
 
         """
@@ -1842,6 +2019,42 @@ class pRFViewer(Viewer):
 
         return df_est
 
+    def get_Wmean_estimate_roi_df(self, participant, estimates_arr = [], weights_arr = [],
+                                   ROIs = None, roi_verts = None, model = 'gauss'):
+
+        """
+        Helper function to get estimates dataframe values for each ROI
+        will average values based on est key param and weight (r2)
+        """
+
+        ## save rsq values in dataframe, for plotting
+        df_est = pd.DataFrame({'sj': [], 'ROI': [], 'value': [], 'model': []})
+
+        for idx,rois_ks in enumerate(ROIs): 
+            
+            # mask estimates
+            print('masking estimates for ROI %s'%rois_ks)
+
+            if len(roi_verts[rois_ks]) > 0:
+                roi_arr = estimates_arr[roi_verts[rois_ks]]
+                roi_weights = weights_arr[roi_verts[rois_ks]]
+
+                # remove nans, and average
+                not_nan_ind = np.where((~np.isnan(roi_weights)))[0]
+                avg_value = np.average(roi_arr[not_nan_ind], axis = 0, weights = roi_weights[not_nan_ind])
+            else:
+                print('No vertices found for ROI')
+                avg_value = np.nan
+
+            df_est = pd.concat((df_est,
+                                pd.DataFrame({'sj': ['sub-{sj}'.format(sj = participant)], 
+                                            'ROI': [rois_ks], 
+                                            'value': [avg_value],
+                                            'model': [model]})
+                            ))
+
+        return df_est
+
     def get_ROI_verts_dict(self):
 
         """
@@ -1857,7 +2070,6 @@ class pRFViewer(Viewer):
             roi_verts[val] = cortex.get_roi_verts(self.pysub,val)[val]
 
         return roi_verts
-
 
     def plot_vertex_tc(self, participant, vertex = None, run_type = 'mean_run', fit_now = True,
                             model2fit = 'gauss', chunk_num = None, ROI = None, fit_hrf = False):
@@ -1965,9 +2177,19 @@ class pRFViewer(Viewer):
 
         # Now actually plot results
          
-        ## RSQ ###
+        ### RSQ ###
         self.plot_rsq(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
                                             model_name = prf_model_name, figures_pth = figures_pth)
+        
+        ### PA ###
+        self.plot_pa(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
+                    model_name = prf_model_name, figures_pth = figures_pth, n_bins_colors = 256, max_x_lim = 5, angle_thresh = 3*np.pi/4)
+        
+        ### Exponent - only for CSS ###
+        if prf_model_name == 'css':
+            self.plot_exponent(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
+                                            model_name = prf_model_name, figures_pth = figures_pth)
+        
 
     def plot_rsq(self, participant_list = [], group_estimates = [], figures_pth = None, 
                         model_name = 'gauss', fit_type = 'mean_run'):
@@ -2039,12 +2261,12 @@ class pRFViewer(Viewer):
         # if we provided several participants, make group plot
         if len(participant_list) > 1:
 
-            fig, ax1 = plt.subplots(1,1, figsize=(20,7.5), dpi=100, facecolor='w', edgecolor='k')
+            fig, ax1 = plt.subplots(1,1, figsize=(15,5), dpi=100, facecolor='w', edgecolor='k')
 
             # point plot with group average and standard error of the mean
             v1 = sns.pointplot(data = avg_roi_df, x = 'ROI', y = 'value', 
                         palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
-                        errorbar = 'se', ax=ax1, scale=2, capsize = .2) 
+                        errorbar=('ci', 95), n_boot=1000, ax=ax1)#, scale=2, capsize = .2) 
             # change alpha
             plt.setp(v1.collections, alpha=.7, edgecolor = None)
 
@@ -2063,10 +2285,227 @@ class pRFViewer(Viewer):
             plt.ylabel('RSQ',fontsize = 20,labelpad=18)
             plt.ylim(0,1)
 
-            fig_name = op.join(sub_figures_pth, 'sub-group_task-pRF_model-{model}_pointplot_RSQ.png'.format(model = model_name))
+            fig_name = op.join(figures_pth, 'sub-group_task-pRF_model-{model}_pointplot_RSQ.png'.format(model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
             fig.savefig(fig_name)
 
+    def plot_pa(self, participant_list = [], group_estimates = [], figures_pth = None, 
+                    model_name = 'gauss', fit_type = 'mean_run', n_bins_colors = 256, max_x_lim = 5, angle_thresh = 3*np.pi/4):
+        
+        """
+        Plot polar angle estimates - flatmaps -
+        for all participants in list
+        """
 
+        # make output folder for figures
+        if figures_pth is None:
+            figures_pth = op.join(self.outputdir, 'polar_angle', fit_type)
+
+        # get matplotlib color map from segmented colors
+        PA_cmap = self.make_colormap(colormap = ['#ec9b3f','#f3eb53','#7cb956','#82cbdb',
+                                        '#3d549f','#655099','#ad5a9b','#dd3933'], bins = n_bins_colors, 
+                                        cmap_name = 'PA_mackey_costum',
+                                        discrete = False, add_alpha = False, return_cmap = True)
+
+        ## loop over participants in list
+        for pp in participant_list:
+            
+            ## use RSQ as alpha level for flatmaps
+            r2 = group_estimates['sub-{sj}'.format(sj = pp)]['r2']
+            alpha_level = normalize(np.clip(r2, 0, .5)) # normalize 
+            alpha_level[np.where((np.isnan(r2)))[0]] = np.nan
+
+            ## position estimates
+            xx = group_estimates['sub-{sj}'.format(sj = pp)]['x']
+            yy = group_estimates['sub-{sj}'.format(sj = pp)]['y']
+
+            ## calculate polar angle 
+            complex_location = xx + yy * 1j 
+
+            polar_angle = np.angle(complex_location)
+            polar_angle_norm = ((polar_angle + np.pi) / (np.pi * 2.0)) # normalize PA between 0 and 1
+            polar_angle_norm[np.where((np.isnan(r2)))[0]] = np.nan
+
+            
+            # make path to save sub-specific figures
+            sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
+            os.makedirs(sub_figures_pth, exist_ok=True)
+
+            fig_name = op.join(sub_figures_pth, 'sub-{sj}_task-pRF_model-{model}_flatmap_PA.png'.format(sj = pp,
+                                                                                                    model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(polar_angle_norm, est_arr2 = alpha_level,
+                                        cmap = PA_cmap, 
+                                        vmin1 = 0, vmax1 = 1, 
+                                        vmin2 = 0, vmax2 = 1, 
+                                        fig_abs_name = fig_name)
+            
+            # also plot non-uniform color wheel
+            rgb_pa = self.get_NONuniform_polar_angle(xx = xx, yy = yy, rsq = r2, 
+                                                angle_thresh = angle_thresh, 
+                                                rsq_thresh = 0)
+            ## make ones mask,
+            #ones_mask = np.ones(r2.shape)
+            #ones_mask[np.where((np.isnan(r2)))[0]] = np.nan
+
+            fig_name = fig_name.replace('_PA', '_PAnonUNI')
+
+            #### plot flatmap ###
+            flatmap = self.plot_RGBflatmap(rgb_arr = rgb_pa, alpha_arr = alpha_level, #ones_mask,
+                                            fig_abs_name = fig_name)
+            
+            # plot x and y separately, for sanity check
+            # XX
+            fig_name = fig_name.replace('_PAnonUNI', '_XX')
+
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(xx, est_arr2 = alpha_level,
+                                        cmap = 'BuBkRd_alpha_2D', 
+                                        vmin1 = -max_x_lim, vmax1 = max_x_lim, 
+                                        vmin2 = 0, vmax2 = 1, 
+                                        fig_abs_name = fig_name)
+            
+            # YY
+            fig_name = fig_name.replace('_XX', '_YY')
+
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(yy, est_arr2 = alpha_level,
+                                        cmap = 'BuBkRd_alpha_2D', 
+                                        vmin1 = -max_x_lim, vmax1 = max_x_lim, 
+                                        vmin2 = 0, vmax2 = 1, 
+                                        fig_abs_name = fig_name)
+            
+            ## plot the colorwheels as figs
+            
+            # non uniform colorwheel
+            self.plot_pa_colorwheel(resolution=800, angle_thresh = angle_thresh, cmap_name = 'hsv', 
+                                            continuous = True, fig_name = op.join(sub_figures_pth, 'hsv'))
+
+            # uniform colorwheel, continuous
+            self.plot_pa_colorwheel(resolution=800, angle_thresh = np.pi, 
+                                                    cmap_name = ['#ec9b3f','#f3eb53','#7cb956','#82cbdb','#3d549f','#655099','#ad5a9b','#dd3933'], 
+                                            continuous = True, fig_name = op.join(sub_figures_pth, 'PA_mackey'))
+
+            # uniform colorwheel, discrete
+            self.plot_pa_colorwheel(resolution=800, angle_thresh = np.pi, 
+                                                    cmap_name = ['#ec9b3f','#f3eb53','#7cb956','#82cbdb','#3d549f','#655099','#ad5a9b','#dd3933'], 
+                                            continuous = False, fig_name = op.join(sub_figures_pth, 'PA_mackey'))
+
+    def plot_exponent(self, participant_list = [], group_estimates = [], figures_pth = None, 
+                        model_name = 'css', fit_type = 'mean_run'):
+
+        """
+        Plot exponent - flatmap and violinplot for ROIs
+        for all participants in list
+        """
+
+        ## get ROI vertices
+        roi_verts = self.get_ROI_verts_dict()
+
+        # make output folder for figures
+        if figures_pth is None:
+            figures_pth = op.join(self.outputdir, 'exponent', fit_type)
+        
+        # save values per roi in dataframe
+        avg_roi_df = pd.DataFrame()
+
+        ## loop over participants in list
+        for pp in participant_list:
+            
+            # make path to save sub-specific figures
+            sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
+            os.makedirs(sub_figures_pth, exist_ok=True)
+
+            fig_name = op.join(sub_figures_pth, 'sub-{sj}_task-pRF_model-{model}_flatmap_Exponent.png'.format(sj = pp,
+                                                                                                    model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+
+            ## use RSQ as alpha level for flatmaps
+            r2 = group_estimates['sub-{sj}'.format(sj = pp)]['r2']
+            alpha_level = normalize(np.clip(r2, 0, .5)) # normalize 
+
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(group_estimates['sub-{sj}'.format(sj = pp)]['ns'], 
+                                        est_arr2 = alpha_level,
+                                        cmap = 'plasma', 
+                                        vmin1 = 0, vmax1 = 1, 
+                                        vmin2 = 0, vmax2 = 1, 
+                                        fig_abs_name = fig_name)
+            
+            ## for each participant, get dataframe with 
+            # estimate value per ROI
+            df_estimates_ROIs = self.get_estimates_roi_df(pp, group_estimates['sub-{sj}'.format(sj = pp)], 
+                                                         ROIs = roi_verts.keys(), 
+                                                        roi_verts = roi_verts, 
+                                                        est_key = 'ns', model = model_name)
+            
+            ## plot violinplot
+            fig, ax1 = plt.subplots(1,1, figsize=(20,7.5), dpi=100, facecolor='w', edgecolor='k')
+            v1 = sns.violinplot(data = df_estimates_ROIs, x = 'ROI', y = 'value', 
+                                cut=0, inner='box', palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
+                                linewidth=2.7,saturation = 1, ax = ax1) 
+            # change alpha
+            plt.setp(v1.collections, alpha=.7, edgecolor = None)
+                    
+            v1.set(xlabel=None)
+            v1.set(ylabel=None)
+            plt.margins(y=0.025)
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+
+            plt.xlabel('ROI',fontsize = 20,labelpad=18)
+            plt.ylabel('CSS Exponent',fontsize = 20,labelpad=18)
+            plt.ylim(0,1)
+            fig.savefig(fig_name.replace('flatmap','violinplot'))
+            
+            ## concatenate average per participant, weighted by r2
+            # to make group plot
+            avg_roi_df = pd.concat((avg_roi_df,
+                                    self.get_Wmean_estimate_roi_df(pp, 
+                                                                   estimates_arr = group_estimates['sub-{sj}'.format(sj = pp)]['ns'],
+                                                                    weights_arr = group_estimates['sub-{sj}'.format(sj = pp)]['r2'],
+                                                            ROIs = roi_verts.keys(), roi_verts = roi_verts, model = model_name)))
+            
+        # if we provided several participants, make group plot
+        if len(participant_list) > 1:
+
+            fig, ax1 = plt.subplots(1,1, figsize=(15,5), dpi=100, facecolor='w', edgecolor='k')
+
+            # point plot with group average and standard error of the mean
+            v1 = sns.pointplot(data = avg_roi_df, x = 'ROI', y = 'value', 
+                        palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
+                        errorbar=('ci', 95), n_boot=5000, ax=ax1)#, scale=2, capsize = .2) 
+            # change alpha
+            plt.setp(v1.collections, alpha=.7, edgecolor = None)
+
+            # striplot with median value for all participants
+            sns.stripplot(data = avg_roi_df,
+                        x = 'ROI', y = 'value', order = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'].keys(),
+                        color = 'gray', alpha = 0.3,linewidth=.2, edgecolor='k',ax=ax1)
+
+            v1.set(xlabel=None)
+            v1.set(ylabel=None)
+            plt.margins(y=0.025)
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+
+            plt.xlabel('ROI',fontsize = 20,labelpad=18)
+            plt.ylabel('CSS Exponent',fontsize = 20,labelpad=18)
+            plt.ylim(0,1)
+
+            fig_name = op.join(figures_pth, 'sub-group_task-pRF_model-{model}_pointplot_Exponent.png'.format(model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+            fig.savefig(fig_name)
 
     def open_click_viewer(self, participant, fit_type = 'mean_run', prf_model_name = 'gauss', 
                             max_ecc_ext = 5, mask_arr = True, rsq_threshold = .1):
