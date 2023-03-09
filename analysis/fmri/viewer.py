@@ -12,6 +12,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import matplotlib.colors as colors
+from matplotlib.lines import Line2D
 
 import seaborn as sns
 
@@ -2189,6 +2190,15 @@ class pRFViewer(Viewer):
         if prf_model_name == 'css':
             self.plot_exponent(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
                                             model_name = prf_model_name, figures_pth = figures_pth)
+            
+        ### ECC SIZE ###
+        self.plot_ecc_size(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
+                            model_name = prf_model_name, figures_pth = figures_pth,
+                            n_bins_colors = 256, max_ecc_ext = 6, max_size_ext = 14, n_bins_dist = 8)
+        
+        ### Visual Field coverage ###
+        self.plot_VFcoverage(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
+                                            model_name = prf_model_name, figures_pth = figures_pth)
         
 
     def plot_rsq(self, participant_list = [], group_estimates = [], figures_pth = None, 
@@ -2264,9 +2274,9 @@ class pRFViewer(Viewer):
             fig, ax1 = plt.subplots(1,1, figsize=(15,5), dpi=100, facecolor='w', edgecolor='k')
 
             # point plot with group average and standard error of the mean
-            v1 = sns.pointplot(data = avg_roi_df, x = 'ROI', y = 'value', 
+            v1 = sns.barplot(data = avg_roi_df, x = 'ROI', y = 'value', 
                         palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
-                        errorbar=('ci', 95), n_boot=1000, ax=ax1)#, scale=2, capsize = .2) 
+                        ci = 95,n_boot=5000, ax=ax1)#, scale=2, capsize = .2) 
             # change alpha
             plt.setp(v1.collections, alpha=.7, edgecolor = None)
 
@@ -2480,9 +2490,9 @@ class pRFViewer(Viewer):
             fig, ax1 = plt.subplots(1,1, figsize=(15,5), dpi=100, facecolor='w', edgecolor='k')
 
             # point plot with group average and standard error of the mean
-            v1 = sns.pointplot(data = avg_roi_df, x = 'ROI', y = 'value', 
+            v1 = sns.barplot(data = avg_roi_df, x = 'ROI', y = 'value', 
                         palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
-                        errorbar=('ci', 95), n_boot=5000, ax=ax1)#, scale=2, capsize = .2) 
+                        ci = 95,n_boot=5000, ax=ax1)#, scale=2, capsize = .2) 
             # change alpha
             plt.setp(v1.collections, alpha=.7, edgecolor = None)
 
@@ -2506,6 +2516,425 @@ class pRFViewer(Viewer):
             if self.pRFModelObj.fit_hrf:
                 fig_name = fig_name.replace('.png','_withHRF.png') 
             fig.savefig(fig_name)
+
+    def plot_VFcoverage(self, participant_list = [], group_estimates = [], figures_pth = None, 
+                        model_name = 'gauss', fit_type = 'mean_run', vert_lim_dva = 5.5, hor_lim_dva = 8.8):
+
+        """
+        Plot visual field coverage - hexbins for each ROI
+        for all participants in list
+        """
+
+        ## get ROI vertices
+        roi_verts = self.get_ROI_verts_dict()
+
+        # get mid vertex index (diving hemispheres)
+        left_index = cortex.db.get_surfinfo(self.pysub).left.shape[0] 
+
+        # make output folder for figures
+        if figures_pth is None:
+            figures_pth = op.join(self.outputdir, 'VF_coverage', fit_type)
+        
+        # save values per roi in dataframe
+        df_merge = pd.DataFrame()
+
+        ## loop over participants in list
+        for pp in participant_list:
+            
+            # make path to save sub-specific figures
+            sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
+            os.makedirs(sub_figures_pth, exist_ok=True)
+            
+            ## for each participant, get dataframe with 
+            # estimate value per ROI
+            xx_pp_roi_df = self.get_estimates_roi_df(pp, group_estimates['sub-{sj}'.format(sj = pp)], 
+                                                        ROIs = roi_verts.keys(), 
+                                                        roi_verts = roi_verts, 
+                                                        est_key = 'x', model = model_name)
+            yy_pp_roi_df = self.get_estimates_roi_df(pp, group_estimates['sub-{sj}'.format(sj = pp)], 
+                                                        ROIs = roi_verts.keys(), 
+                                                        roi_verts = roi_verts, 
+                                                        est_key = 'y', model = model_name)
+            
+            # left hemisphere
+            df_LH = pd.concat((xx_pp_roi_df[xx_pp_roi_df['index'] < left_index].rename(columns={'value': 'x'}),
+                    yy_pp_roi_df[yy_pp_roi_df['index'] < left_index].rename(columns={'value': 'y'})[['y']]), axis = 1)
+            df_LH['hemisphere'] = 'LH'
+
+            # right hemisphere
+            df_RH = pd.concat((xx_pp_roi_df[xx_pp_roi_df['index'] >= left_index].rename(columns={'value': 'x'}),
+                    yy_pp_roi_df[yy_pp_roi_df['index'] >= left_index].rename(columns={'value': 'y'})[['y']]), axis = 1)
+            df_RH['hemisphere'] = 'RH'
+
+            ## save in merged DF
+            df_merge = pd.concat((df_merge, pd.concat((df_LH, df_RH))))
+
+            # actually plot hexabins
+            fig_name = op.join(sub_figures_pth, 'sub-{sj}_task-pRF_model-{model}_VFcoverage.png'.format(sj = pp,
+                                                                                                        model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+
+            for r_name in roi_verts.keys():
+
+                f, ss = plt.subplots(1, 1, figsize=(8,4.5))
+
+                ss.hexbin(df_merge[(df_merge['hemisphere'] == 'LH') & \
+                                    (df_merge['ROI'] == r_name) & \
+                                    (df_merge['sj'] == 'sub-{sj}'.format(sj = pp))].x.values,
+                        df_merge[(df_merge['hemisphere'] == 'LH')& \
+                                    (df_merge['ROI'] == r_name) & \
+                                    (df_merge['sj'] == 'sub-{sj}'.format(sj = pp))].y.values,
+                    gridsize=15, 
+                    cmap='Greens',
+                    extent= np.array([-1, 1, -1, 1]) * hor_lim_dva,
+                    bins='log',
+                    linewidths=0.0625,
+                    edgecolors='black',
+                    alpha=1)
+
+                ss.hexbin(df_merge[(df_merge['hemisphere'] == 'RH')& \
+                                    (df_merge['ROI'] == r_name) & \
+                                    (df_merge['sj'] == 'sub-{sj}'.format(sj = pp))].x.values,
+                        df_merge[(df_merge['hemisphere'] == 'RH')& \
+                                    (df_merge['ROI'] == r_name) & \
+                                    (df_merge['sj'] == 'sub-{sj}'.format(sj = pp))].y.values,
+                    gridsize=15, 
+                    cmap='Reds',
+                    extent= np.array([-1, 1, -1, 1]) * hor_lim_dva,
+                    bins='log',
+                    linewidths=0.0625,
+                    edgecolors='black',
+                    alpha=.5)
+
+                plt.xticks(fontsize = 20)
+                plt.yticks(fontsize = 20)
+                plt.tight_layout()
+                plt.ylim(-vert_lim_dva, vert_lim_dva) #-6,6)#
+                ss.set_aspect('auto')
+                # set middle lines
+                ss.axvline(0, -hor_lim_dva, hor_lim_dva, lw=0.25, color='w')
+                ss.axhline(0, -hor_lim_dva, hor_lim_dva, lw=0.25, color='w')
+
+                # custom lines only to make labels
+                custom_lines = [Line2D([0], [0], color='g',alpha=0.5, lw=4),
+                                Line2D([0], [0], color='r',alpha=0.5, lw=4)]
+
+                plt.legend(custom_lines, ['LH', 'RH'],fontsize = 18)
+                fig_hex = plt.gcf()
+
+                fig_hex.savefig(fig_name.replace('_VFcoverage','_VFcoverage_{rn}'.format(rn = r_name)))
+
+        if len(participant_list) > 1:
+
+            # actually plot hexabins
+            fig_name = op.join(figures_pth, 'sub-group_task-pRF_model-{model}_VFcoverage.png'.format(model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+
+            for r_name in roi_verts.keys():
+
+                f, ss = plt.subplots(1, 1, figsize=(8,4.5))
+
+                ss.hexbin(df_merge[(df_merge['hemisphere'] == 'LH')& \
+                                (df_merge['ROI'] == r_name)].x.values,
+                        df_merge[(df_merge['hemisphere'] == 'LH')& \
+                                (df_merge['ROI'] == r_name)].y.values,
+                    gridsize=15, 
+                    cmap='Greens',
+                    extent= np.array([-1, 1, -1, 1]) * hor_lim_dva,
+                    bins='log',
+                    linewidths=0.0625,
+                    edgecolors='black',
+                    alpha=1)
+
+                ss.hexbin(df_merge[(df_merge['hemisphere'] == 'RH')& \
+                                (df_merge['ROI'] == r_name)].x.values,
+                        df_merge[(df_merge['hemisphere'] == 'RH')& \
+                                (df_merge['ROI'] == r_name)].y.values,
+                    gridsize=15, 
+                    cmap='Reds',
+                    extent= np.array([-1, 1, -1, 1]) * hor_lim_dva,
+                    bins='log',
+                    linewidths=0.0625,
+                    edgecolors='black',
+                    alpha=.5)
+
+                plt.xticks(fontsize = 20)
+                plt.yticks(fontsize = 20)
+                plt.tight_layout()
+                plt.ylim(-vert_lim_dva, vert_lim_dva) #-6,6)#
+                ss.set_aspect('auto')
+                # set middle lines
+                ss.axvline(0, -hor_lim_dva, hor_lim_dva, lw=0.25, color='w')
+                ss.axhline(0, -hor_lim_dva, hor_lim_dva, lw=0.25, color='w')
+
+                # custom lines only to make labels
+                custom_lines = [Line2D([0], [0], color='g',alpha=0.5, lw=4),
+                                Line2D([0], [0], color='r',alpha=0.5, lw=4)]
+
+                plt.legend(custom_lines, ['LH', 'RH'],fontsize = 18)
+                fig_hex = plt.gcf()
+
+                fig_hex.savefig(fig_name.replace('_VFcoverage','_VFcoverage_{rn}'.format(rn = r_name)))
+
+    def plot_ecc_size(self, participant_list = [], group_estimates = [], figures_pth = None, 
+                    model_name = 'gauss', fit_type = 'mean_run', n_bins_colors = 256, 
+                    max_ecc_ext = 6, max_size_ext = 14, n_bins_dist = 20):
+        
+        """
+        Plot ecc and size - flatmaps and linear relationship - 
+        for all participants in list
+        """
+
+        # make output folder for figures
+        if figures_pth is None:
+            figures_pth = op.join(self.outputdir, 'ecc_size', fit_type)
+
+        # get matplotlib color map from segmented colors
+        ecc_cmap = self.make_colormap(colormap = ['#dd3933','#f3eb53','#7cb956','#82cbdb','#3d549f'],
+                                    bins = n_bins_colors, cmap_name = 'ECC_mackey_costum', 
+                                    discrete = False, add_alpha = False, return_cmap = True)
+        
+        ## get ROI vertices
+        roi_verts = self.get_ROI_verts_dict()
+        
+        avg_bin_df = pd.DataFrame()
+
+        ## loop over participants in list
+        for pp in participant_list:
+
+            # make path to save sub-specific figures
+            sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
+            os.makedirs(sub_figures_pth, exist_ok=True)
+            
+            ## use RSQ as alpha level for flatmaps
+            r2 = group_estimates['sub-{sj}'.format(sj = pp)]['r2']
+            alpha_level = normalize(np.clip(r2, 0, .5)) # normalize 
+
+            ## get ECCENTRICITY estimates
+            complex_location = group_estimates['sub-{sj}'.format(sj = pp)]['x'] + group_estimates['sub-{sj}'.format(sj = pp)]['y'] * 1j # calculate eccentricity values
+            eccentricity = np.abs(complex_location)
+
+            fig_name = op.join(sub_figures_pth, 'sub-{sj}_task-pRF_model-{model}_flatmap_ECC.png'.format(sj = pp,
+                                                                                                    model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+            
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(eccentricity,
+                                        est_arr2 = alpha_level,
+                                        cmap = ecc_cmap, 
+                                        vmin1 = 0, vmax1 = max_ecc_ext, 
+                                        vmin2 = 0, vmax2 = 1,
+                                        fig_abs_name = fig_name)
+            
+            ## get SIZE estimates
+            if model_name in ['dn', 'dog']:
+                size_fwhmax, fwatmin = self.pRFModelObj.fwhmax_fwatmin(model_name, group_estimates['sub-{sj}'.format(sj = pp)])
+            else: 
+                size_fwhmax = self.pRFModelObj.fwhmax_fwatmin(model_name, group_estimates['sub-{sj}'.format(sj = pp)])
+            size_fwhmax[np.isnan(r2)] = np.nan
+
+            fig_name = fig_name.replace('_ECC', '_SIZEfwhm')
+
+            #### plot flatmap ###
+            flatmap = self.plot_flatmap(size_fwhmax,
+                                        est_arr2 = alpha_level,
+                                        cmap = 'hot', 
+                                        vmin1 = 0, vmax1 = max_size_ext, 
+                                        vmin2 = 0, vmax2 = 1,
+                                        fig_abs_name = fig_name)
+            
+            ## GET values per ROI ##
+            ecc_pp_roi_df = self.get_estimates_roi_df(pp, eccentricity, 
+                                                            ROIs = roi_verts.keys(), 
+                                                            roi_verts = roi_verts, 
+                                                            model = model_name)
+
+            size_pp_roi_df = self.get_estimates_roi_df(pp, size_fwhmax, 
+                                                            ROIs = roi_verts.keys(), 
+                                                            roi_verts = roi_verts, 
+                                                            model = model_name)
+
+            r2_pp_roi_df = self.get_estimates_roi_df(pp, r2, 
+                                                        ROIs = roi_verts.keys(), 
+                                                        roi_verts = roi_verts, 
+                                                        model = model_name)
+            
+            # merge them into one
+            df_ecc_siz = pd.merge(ecc_pp_roi_df.rename(columns={'value': 'ecc'}),
+                                size_pp_roi_df.rename(columns={'value': 'size'}))
+            df_ecc_siz = pd.merge(df_ecc_siz, r2_pp_roi_df.rename(columns={'value': 'r2'}))
+
+            ## drop the nans
+            df_ecc_siz = df_ecc_siz[~np.isnan(df_ecc_siz.r2)]
+
+            ##### plot unbinned df #########
+            sns.set(font_scale=1.3)
+            sns.set_style("ticks")
+
+            g = sns.lmplot(x="ecc", y="size", hue = 'ROI', data = df_ecc_siz, 
+                           scatter_kws={'alpha':0.05}, scatter=True, 
+                        palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'])
+
+            ax = plt.gca()
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+            ax.axes.set_xlim(0, max_ecc_ext)
+            ax.axes.set_ylim(0.5, max_size_ext)
+            ax.set_xlabel('pRF eccentricity [deg]', fontsize = 20, labelpad = 15)
+            ax.set_ylabel('pRF size FWHMax [deg]', fontsize = 20, labelpad = 15)
+            sns.despine(offset=15)
+            # to make legend full alpha
+            for lh in g._legend.legendHandles: 
+                lh.set_alpha(1)
+            fig2 = plt.gcf()
+
+            fig_name = fig_name.replace('_flatmap_SIZEfwhm', '_ecc_vs_size_UNbinned')
+
+            fig2.savefig(fig_name, dpi=100,bbox_inches = 'tight')
+
+            ## bin it, for cleaner plot
+            for r_name in roi_verts.keys():
+
+                mean_x, _, mean_y, _ = self.get_weighted_mean_bins(df_ecc_siz.loc[(df_ecc_siz['ROI'] == r_name) & \
+                                                                                    (df_ecc_siz['r2'].notna())],
+                                                                                    x_key = 'ecc', y_key = 'size', weight_key = 'r2', n_bins = n_bins_dist)
+
+                avg_bin_df = pd.concat((avg_bin_df,
+                                        pd.DataFrame({ 'sj': np.tile('sub-{sj}'.format(sj = pp), len(mean_x)),
+                                                    'ROI': np.tile(r_name, len(mean_x)),
+                                                    'ecc': mean_x,
+                                                    'size': mean_y
+                                        })))
+                
+            ##### plot binned df #########
+            g = sns.lmplot(x="ecc", y="size", hue = 'ROI', data = avg_bin_df.loc[avg_bin_df['sj'] == 'sub-{sj}'.format(sj = pp)], 
+                           scatter_kws={'alpha':0.15}, scatter=True, 
+                        palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal']) 
+
+            ax = plt.gca()
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+            ax.axes.set_xlim(0, max_ecc_ext)
+            ax.axes.set_ylim(0.5, max_size_ext)
+            ax.set_xlabel('pRF eccentricity [deg]', fontsize = 20, labelpad = 15)
+            ax.set_ylabel('pRF size FWHMax [deg]', fontsize = 20, labelpad = 15)
+            sns.despine(offset=15)
+            # to make legend full alpha
+            for lh in g._legend.legendHandles: 
+                lh.set_alpha(1)
+            fig2 = plt.gcf()
+
+            fig_name = fig_name.replace('_ecc_vs_size_UNbinned', '_ecc_vs_size_binned')
+
+            fig2.savefig(fig_name, dpi=100,bbox_inches = 'tight')
+
+        if len(participant_list) > 1:
+
+            ##### plot binned df for GROUP #########
+            g = sns.lmplot(x="ecc", y="size", hue = 'ROI', data = avg_bin_df,
+                           scatter_kws={'alpha':0.15}, scatter=True, 
+                        palette = self.pRFModelObj.MRIObj.params['plotting']['prf']['colormaps']['ROI_pal'],
+                        x_bins = 8) 
+
+            ax = plt.gca()
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+            ax.axes.set_xlim(0, max_ecc_ext)
+            ax.axes.set_ylim(0.5, max_size_ext)
+            ax.set_xlabel('pRF eccentricity [deg]', fontsize = 20, labelpad = 15)
+            ax.set_ylabel('pRF size FWHMax [deg]', fontsize = 20, labelpad = 15)
+            sns.despine(offset=15)
+            # to make legend full alpha
+            for lh in g._legend.legendHandles: 
+                lh.set_alpha(1)
+            fig2 = plt.gcf()
+
+            fig_name = op.join(figures_pth, 'sub-group_task-pRF_model-{model}_ecc_vs_size_binned.png'.format(model = model_name))
+            # if we fitted hrf, then add that to fig name
+            if self.pRFModelObj.fit_hrf:
+                fig_name = fig_name.replace('.png','_withHRF.png') 
+
+            fig2.savefig(fig_name, dpi=100,bbox_inches = 'tight')
+
+            ## subdivide into areas
+            ### plot for Occipital Areas - V1 V2 V3 V3AB hV4 LO ###
+            roi2plot = self.pRFModelObj.MRIObj.params['plotting']['prf']['occipital']
+
+            g = sns.lmplot(x="ecc", y="size", hue = 'ROI', data = avg_bin_df[avg_bin_df.ROI.isin(roi2plot)],
+                           scatter_kws={'alpha':0.15}, scatter=True, 
+                        palette="YlGnBu_r", markers=['^','s','o','v','D','h'],
+                        x_bins = 8)
+
+            ax = plt.gca()
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+            ax.axes.set_xlim(0, max_ecc_ext)
+            ax.axes.set_ylim(0.5, max_size_ext)
+            ax.set_xlabel('pRF eccentricity [deg]', fontsize = 20, labelpad = 15)
+            ax.set_ylabel('pRF size FWHMax [deg]', fontsize = 20, labelpad = 15)
+            sns.despine(offset=15)
+            # to make legend full alpha
+            for lh in g._legend.legendHandles: 
+                lh.set_alpha(1)
+            fig2 = plt.gcf()
+
+            fig_name_region = fig_name.replace('_binned', '_binned_occipital')
+            fig2.savefig(fig_name_region, dpi=100,bbox_inches = 'tight')
+
+            ### plot for Parietal Areas - IPS0 IPS1 IPS2+ ###
+            roi2plot = self.pRFModelObj.MRIObj.params['plotting']['prf']['parietal']
+
+            g = sns.lmplot(x="ecc", y="size", hue = 'ROI', data = avg_bin_df[avg_bin_df.ROI.isin(roi2plot)],
+                           scatter_kws={'alpha':0.15}, scatter=True, 
+                        palette="YlOrRd",markers=['^','s','o'],
+                        x_bins = 8)
+
+            ax = plt.gca()
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+            ax.axes.set_xlim(0, max_ecc_ext)
+            ax.axes.set_ylim(0.5, max_size_ext)
+            ax.set_xlabel('pRF eccentricity [deg]', fontsize = 20, labelpad = 15)
+            ax.set_ylabel('pRF size FWHMax [deg]', fontsize = 20, labelpad = 15)
+            sns.despine(offset=15)
+            # to make legend full alpha
+            for lh in g._legend.legendHandles: 
+                lh.set_alpha(1)
+            fig2 = plt.gcf()
+
+            fig_name_region = fig_name.replace('_binned', '_binned_parietal')
+            fig2.savefig(fig_name_region, dpi=100,bbox_inches = 'tight')
+
+            ### plot for Frontal Areas - sPCS iPCS ###
+            roi2plot = self.pRFModelObj.MRIObj.params['plotting']['prf']['frontal']
+
+            g = sns.lmplot(x="ecc", y="size", hue = 'ROI', data = avg_bin_df[avg_bin_df.ROI.isin(roi2plot)],
+                           scatter_kws={'alpha':0.15}, scatter=True, 
+                        palette="PuRd",markers=['^','s'],
+                        x_bins = 8)
+
+            ax = plt.gca()
+            plt.xticks(fontsize = 18)
+            plt.yticks(fontsize = 18)
+            ax.axes.set_xlim(0, max_ecc_ext)
+            ax.axes.set_ylim(0.5, max_size_ext)
+            ax.set_xlabel('pRF eccentricity [deg]', fontsize = 20, labelpad = 15)
+            ax.set_ylabel('pRF size FWHMax [deg]', fontsize = 20, labelpad = 15)
+            sns.despine(offset=15)
+            # to make legend full alpha
+            for lh in g._legend.legendHandles: 
+                lh.set_alpha(1)
+            fig2 = plt.gcf()
+
+            fig_name_region = fig_name.replace('_binned', '_binned_frontal')
+            fig2.savefig(fig_name_region, dpi=100,bbox_inches = 'tight')
+
 
     def open_click_viewer(self, participant, fit_type = 'mean_run', prf_model_name = 'gauss', 
                             max_ecc_ext = 5, mask_arr = True, rsq_threshold = .1):

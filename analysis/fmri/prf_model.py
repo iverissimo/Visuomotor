@@ -378,7 +378,7 @@ class prfModel:
 
         ## bounds
         fitpar_dict['gauss']['bounds'] = [(-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # x
-                                        (-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # y
+                                        (-1.5 * (max_ecc_size), 1.5 * (max_ecc_size)),  # y
                                         (eps, 1.5 * (max_ecc_size * 2)),  # prf size
                                         (0, 1000),  # prf amplitude
                                         (-500, 1000)] # bold baseline
@@ -397,7 +397,7 @@ class prfModel:
 
         ## bounds
         fitpar_dict['css']['bounds'] = [(-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # x
-                                        (-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # y
+                                        (-1.5 * (max_ecc_size), 1.5 * (max_ecc_size)),  # y
                                         (eps, 1.5 * (max_ecc_size * 2)),  # prf size
                                         (0, 1000),  # prf amplitude
                                         (-500, 1000), # bold baseline
@@ -424,7 +424,7 @@ class prfModel:
 
         ## bounds
         fitpar_dict['dn']['bounds'] = [(-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # x
-                                        (-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # y
+                                        (-1.5 * (max_ecc_size), 1.5 * (max_ecc_size)),  # y
                                         (eps, 1.5 * (max_ecc_size * 2)),  # prf size
                                         (0, 1000),  # prf amplitude
                                         (-500, 1000), # bold baseline
@@ -448,7 +448,7 @@ class prfModel:
 
         ## bounds
         fitpar_dict['dog']['bounds'] = [(-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # x
-                                        (-1.5 * (max_ecc_size * 2), 1.5 * (max_ecc_size * 2)),  # y
+                                        (-1.5 * (max_ecc_size), 1.5 * (max_ecc_size)),  # y
                                         (eps, 1.5 * (max_ecc_size * 2)),  # prf size
                                         (0, 1000),  # prf amplitude
                                         (-500, 1000), # bold baseline
@@ -672,7 +672,9 @@ class prfModel:
                                         polar_grid = fit_params['gauss']['polars'], 
                                         size_grid = fit_params['gauss']['sizes'], 
                                         fixed_grid_baseline = fit_params['gauss']['fixed_grid_baseline'],
-                                        grid_bounds = fit_params['gauss']['grid_bounds'])
+                                        grid_bounds = fit_params['gauss']['grid_bounds'],
+                                        y_ecc_lim = self.MRIObj.params['fitting']['prf']['y_ecc_lim'], 
+                                        x_ecc_lim = self.MRIObj.params['fitting']['prf']['x_ecc_lim'])
 
                 # iterative fit
                 print("Gauss model ITERATIVE fit")
