@@ -3,6 +3,7 @@ import os
 import os.path as op
 import pandas as pd
 import yaml
+import re
 
 import ptitprince as pt # raincloud plots
 
@@ -24,9 +25,11 @@ import click_viewer
 import scipy
 from statsmodels.stats import weightstats
 
+import nibabel as nib
+
 class Viewer:
 
-    def __init__(self, pysub = 'fsaverage'):
+    def __init__(self, pysub = 'fsaverage', derivatives_pth = None):
         
         """__init__
         constructor for class 
@@ -40,10 +43,286 @@ class Viewer:
         # pycortex subject to use
         self.pysub = pysub
 
+        # derivatives path
+        self.derivatives_pth = derivatives_pth
+
         # set font type for plots globally
         plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['font.sans-serif'] = 'Helvetica'
 
+    def add_data2overlay(self, flatmap = None, name = ''):
+
+        """
+        Helper func to add data to overlay.
+        Useful for ROI drawing
+        
+        Parameters
+        ----------
+        flatmap: pycortex data object
+            XD vertex data
+        name: str
+            data layer name for data
+        """
+
+        # ADD ROI TO OVERLAY
+        cortex.utils.add_roi(flatmap, name = name, open_inkscape=False)
+
+
+    def get_atlas_roi_df(self, annot_pth = None, hemi_labels = {'lh': 'L', 'rh': 'R'}, 
+                                base_str = 'HCP-MMP1.annot', return_RGBA = False):
+
+        """
+        Get all atlas ROI labels and vertex indices, for both hemispheres
+        and return it as pandas DF
+
+        Assumes Glasser atlas (2016), might generalize to others in the future
+        
+        Parameters
+        ----------
+        annot_pth: str
+            absolute path to atlas annotation files
+        hemi_labels: dict
+            key value pair of hemi labels (key: label for annot file, value: hemisphere label we will use later)
+        base_str: str
+            base name for annotation file 
+        return_RGBA: bool
+            if we want to return rgbt(a) as used in Glasser atlas figures, for each vertex
+        """
+
+        # number of vertices in one hemisphere (for bookeeping) 
+        hemi_vert_num = cortex.db.get_surfinfo(self.pysub).left.shape[0] 
+
+        if annot_pth is None:
+            annot_pth = op.join(self.derivatives_pth, 'atlas', 'Glasser_et_al_2016_HCP_MMP1.0_qN_RVVG',
+                            'HCP_PhaseTwo', 'Q1-Q6_RelatedParcellation210','MNINonLinear','fsaverage_LR32k')
+
+        # make empty rgb dict (although we might not use it)
+        atlas_rgb_dict = {'R': [], 'G': [], 'B': [], 'A': []}
+
+        # fill atlas dataframe per hemi
+        atlas_df = pd.DataFrame({'ROI': [], 'hemi_vertex': [], 'merge_vertex': [], 'hemisphere': []})
+
+        for hemi in hemi_labels.keys():
+            
+            # get annotation file for hemisphere
+            annotfile = [op.join(annot_pth,x) for x in os.listdir(annot_pth) if base_str in x and hemi in x][0]
+            print('Loading annotations from %s'%annotfile)
+
+            # read annotation file, save:
+            # labels - annotation id at each vertex.
+            # ctab - RGBT + label id colortable array.
+            # names - The names of the labels
+            h_labels, h_ctab, h_names = nib.freesurfer.io.read_annot(annotfile)
+
+            # get labels as strings
+            label_inds_names = [[ind, re.split('_', str(name))[1]] for ind,name in enumerate(h_names) if '?' not in str(name)]
+    
+            # fill df for each hemi roi
+            for hemi_roi in label_inds_names:
+                
+                # vertice indices for that roi in that hemisphere
+                hemi_roi_verts = np.where((h_labels == hemi_roi[0]))[0]
+                # and for full surface
+                surf_roi_verts = hemi_roi_verts + hemi_vert_num if hemi_labels[hemi] == 'R' else hemi_roi_verts
+                
+                atlas_df = pd.concat((atlas_df,
+                                    pd.DataFrame({'ROI': np.tile(hemi_roi[-1], len(hemi_roi_verts)), 
+                                                'hemi_vertex': hemi_roi_verts, 
+                                                'merge_vertex': surf_roi_verts, 
+                                                'hemisphere': np.tile(hemi_labels[hemi], len(hemi_roi_verts))})
+                                    
+                                    ),ignore_index=True)
+
+            # if we want RGB + A save values, 
+            # scaled to go from 0-1 (for pycortex plotting) and to have alpha and not T
+            if return_RGBA:
+                for _,lbl in enumerate(h_labels):
+                    atlas_rgb_dict['R'].append(h_ctab[lbl,0]/255) 
+                    atlas_rgb_dict['G'].append(h_ctab[lbl,1]/255) 
+                    atlas_rgb_dict['B'].append(h_ctab[lbl,2]/255) 
+                    atlas_rgb_dict['A'].append((255 - h_ctab[lbl,3])/255) 
+                
+        # allow to be used later one
+        self.atlas_df = atlas_df
+
+        if return_RGBA:
+            return atlas_rgb_dict
+
+    def get_fs_coords(self, pysub = 'fsaverage', merge = True):
+
+        """
+        get freesurfer surface mesh coordinates
+
+        Parameters
+        ----------
+        pysub: str
+            pycortex sub name
+        merge: bool
+            if we are merging both hemispheres, and hence getting coordinates for both combined or separate
+        """
+
+        ## FreeSurfer surface file format: Contains a brain surface mesh in a binary format
+        # Such a mesh is defined by a list of vertices (each vertex is given by its x,y,z coords) 
+        # and a list of faces (each face is given by three vertex indices)
+
+        if merge:
+            pts, polys = cortex.db.get_surf(pysub, 'flat', merge=True)
+
+            return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
+        else:
+            left, right = cortex.db.get_surf(pysub, 'flat', merge=False)
+
+            return {'LH': [left[0][:,0], left[0][:,1], left[0][:,2]],
+                    'RH': [right[0][:,0], right[0][:,1], right[0][:,2]]} # [vertex, axis] --> x, y, z
+
+    def get_roi_vert_list(self, roi_df, roi_list = [], hemi = 'BH'):
+
+        """
+        get vertex indices for an ROI, given an ROI df (usually for atlas, but not necessarily)
+        and a list of labels
+        for a specific hemisphere (or both)
+        
+        Parameters
+        ----------
+        roi_df: pd DataFrame
+            dataframe with all ROIs names, hemispheres and vertices
+        roi_list: list
+            list of strings with ROI labels to load
+        hemi: str
+            which hemisphere (LH, RH or BH - both)
+        """
+
+        roi_vert = []
+
+        for roi2plot in roi_list:
+            if hemi == 'BH':
+                roi_vert += list(roi_df[roi_df['ROI'] == roi2plot].merge_vertex.values.astype(int))
+            else:
+                roi_vert += list(roi_df[(roi_df['ROI'] == roi2plot) & \
+                                (roi_df['hemisphere'] == hemi[0])].merge_vertex.values.astype(int))
+
+        return np.array(roi_vert)
+
+    def get_rotation_angle(self, roi_df, roi_list = [], pysub = 'fsaverage'):
+
+        """
+        given a reference ROI, use PCA to find major axis (usually y),
+        and get theta angle value, that is used to build rotation matrix
+        
+        Parameters
+        ----------
+        roi_df: pd DataFrame
+            dataframe with all ROIs names, hemispheres and vertices
+        roi_list: list
+            list of strings with ROI labels to load
+        """
+        ## get surface x and y coordinates, for each hemisphere
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = pysub, 
+                                                            merge = True)
+
+        ref_theta = {}
+        for hemi in ['LH', 'RH']:
+            # get vertex indices for selected ROI and hemisphere
+            ref_roi_vert = self.get_roi_vert_list(roi_df, roi_list = roi_list, hemi = hemi)
+
+            # x,y coordinate array for ROI [2, vertex]
+            orig_coords = np.vstack((x_coord_surf[ref_roi_vert], 
+                                      y_coord_surf[ref_roi_vert]))
+
+            ## center the coordinates (to have zero mean)
+            roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
+                                            orig_coords[1] - np.mean(orig_coords[1])))
+
+            ## get covariance matrix and eigen vector and values
+            cov = np.cov(roi_coord_zeromean)
+            evals, evecs = np.linalg.eig(cov)
+
+            # Sort eigenvalues in decreasing order
+            sort_indices = np.argsort(evals)[::-1]
+            x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
+            x_v2, y_v2 = evecs[:, sort_indices[1]]
+
+            # calculate theta
+            ref_theta[hemi] = np.arctan((x_v1)/(y_v1))  
+
+        return ref_theta
+    
+    def transform_roi_coords(self, orig_coords, fig_pth = None, roi_name = '', theta = None):
+
+        """
+        Use PCA to rotate x,y ROI coordinates along major axis (usually y)
+        NOTE - Assumes we are providing ROI from 1 hemisphere only
+        
+        Parameters
+        ----------
+        orig_coords: arr
+            x,y coordinate array for ROI [2, vertex]
+        fig_pth: str
+            if provided, will plot some sanity check plots and save in absolute dir
+        roi_name: str
+            roi name, used when fig_pth is not None
+        theta: float
+            rotation angle, if None will calculate relative to major component axis
+        """
+
+        ## center the coordinates (to have zero mean)
+        roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
+                                        orig_coords[1] - np.mean(orig_coords[1])))
+
+        ## get covariance matrix and eigen vector and values
+        cov = np.cov(roi_coord_zeromean)
+        evals, evecs = np.linalg.eig(cov)
+
+        # Sort eigenvalues in decreasing order
+        sort_indices = np.argsort(evals)[::-1]
+        x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
+        x_v2, y_v2 = evecs[:, sort_indices[1]]
+
+        # rotate
+        if theta is None:
+            theta = np.arctan((x_v1)/(y_v1))  
+        else:
+            print('using input theta value')
+        rotation_mat = np.matrix([[np.cos(theta), -np.sin(theta)],
+                                    [np.sin(theta), np.cos(theta)]])
+        transformed_mat = rotation_mat * roi_coord_zeromean
+
+        # get transformed coordenates
+        x_transformed, y_transformed = transformed_mat.A
+        roi_coord_transformed = np.vstack((x_transformed, y_transformed))
+
+        # plot zero centered ROI and major axis 
+        fig, axes = plt.subplots(1,3, figsize=(18,4))
+
+        axes[0].scatter(orig_coords[0], orig_coords[1])
+        axes[0].axis('equal')
+        axes[0].set_title('ROI original coords')
+        
+        scale = 20
+        axes[1].plot([x_v1*-scale*2, x_v1*scale*2],
+                    [y_v1*-scale*2, y_v1*scale*2], color='red')
+        axes[1].plot([x_v2*-scale, x_v2*scale],
+                    [y_v2*-scale, y_v2*scale], color='blue')
+        axes[1].scatter(roi_coord_zeromean[0],
+                        roi_coord_zeromean[1])
+        axes[1].axis('equal')
+        axes[1].set_title('ROI zero mean + major axis')
+
+        axes[2].plot(roi_coord_zeromean[0],
+                    roi_coord_zeromean[1], 'b.', alpha=.1)
+        axes[2].plot(roi_coord_transformed[0],
+                    roi_coord_transformed[1], 'g.')
+        axes[2].axis('equal')
+        axes[2].set_title('ROI rotated')
+
+        if fig_pth is not None:
+            # if output path doesn't exist, create it
+            os.makedirs(fig_pth, exist_ok = True)
+            fig.savefig(op.join(fig_pth, 'ROI_PCA_%s.png'%roi_name))
+        else:
+            plt.show()
+
+        return roi_coord_transformed
 
     def get_flatmaps(self, est_arr1, est_arr2 = None, 
                             vmin1 = 0, vmax1 = .8, vmin2 = None, vmax2 = None,
@@ -87,7 +366,10 @@ class Viewer:
 
     def plot_flatmap(self, est_arr1, est_arr2 = None, verts = None, 
                             vmin1 = 0, vmax1 = .8, vmin2 = None, vmax2 = None, 
-                            cmap='hot', fig_abs_name = None):
+                            cmap='hot', fig_abs_name = None, recache = False, with_colorbar = True,
+                            with_curvature = True, with_sulci = True, with_labels=False,
+                            curvature_brightness = 0.4, curvature_contrast = 0.1, with_rois = True,
+                            zoom2ROI = None, hemi_list = ['left', 'right'], figsize=(15,5), dpi=300):
 
         """
         plot flatmap of data (1D)
@@ -154,13 +436,52 @@ class Viewer:
             os.makedirs(fig_pth, exist_ok = True)
 
             print('saving %s' %fig_abs_name)
-            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache=False,with_colorbar=True,
-                                                with_curvature=True,with_sulci=True,with_labels=False,
-                                                curvature_brightness = 0.4, curvature_contrast = 0.1)
+            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
+                                                with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
+                                                curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
         else:
-            cortex.quickshow(flatmap, recache=False,with_colorbar=True,
-                                    with_curvature=True,with_sulci=True,with_labels=False,
-                                    curvature_brightness = 0.4, curvature_contrast = 0.1)
+            if len(hemi_list)>1 and zoom2ROI is not None:
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize = figsize, dpi = dpi)
+            else:
+                fig, ax1 =  plt.subplots(1, figsize = figsize, dpi = dpi)
+
+            cortex.quickshow(flatmap, fig = ax1, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
+                                    with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
+                                    curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
+            
+            if zoom2ROI is not None:
+                # Zoom on just one hemisphere
+                self.zoom_to_roi(self.pysub, zoom2ROI, hemi_list[0], ax=ax1)
+
+                if len(hemi_list)>1:
+                    cortex.quickshow(flatmap, fig = ax2, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
+                                    with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
+                                    curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
+                    # Zoom on just one region
+                    self.zoom_to_roi(self.pysub, zoom2ROI, hemi_list[1], ax=ax2)
+            
+            return flatmap
+        
+    def zoom_to_roi(self, subject, roi = None, hem = 'left', margin=10.0, ax=None):
+
+        """
+        Plot zoomed in view of flatmap, around a given ROI.
+        need to give it the flatmap axis as ref, so it know what to do
+        """
+
+        roi_verts = cortex.get_roi_verts(subject, roi)[roi]
+        roi_map = cortex.Vertex.empty(subject)
+        roi_map.data[roi_verts] = 1
+
+        (lflatpts, lpolys), (rflatpts, rpolys) = cortex.db.get_surf(subject, "flat",
+                                                                    nudge=True)
+        sel_pts = dict(left=lflatpts, right=rflatpts)[hem]
+        roi_pts = sel_pts[np.nonzero(getattr(roi_map, hem))[0],:2]
+
+        xmin, ymin = roi_pts.min(0) - margin
+        xmax, ymax = roi_pts.max(0) + margin
+        
+        ax.axis([xmin, xmax, ymin, ymax])
             
     def plot_RGBflatmap(self, rgb_arr = [], alpha_arr = None, fig_abs_name = None):
 
@@ -344,6 +665,44 @@ class Viewer:
         else:
             return rgb_fn 
 
+    def make_2D_colormap(self, rgb_color = '101', bins = 50, scale=[1,1]):
+        
+        """
+        generate 2D basic colormap
+        and save to pycortex filestore
+        """
+        
+        ##generating grid of x bins
+        x,y = np.meshgrid(
+            np.linspace(0,1*scale[0],bins),
+            np.linspace(0,1*scale[1],bins)) 
+        
+        # define color combination for plot
+        if rgb_color=='101': #red blue
+            col_grid = np.dstack((x,np.zeros_like(x), y))
+            name='RB'
+        elif rgb_color=='110': # red green
+            col_grid = np.dstack((x, y,np.zeros_like(x)))
+            name='RG'
+        elif rgb_color=='011': # green blue
+            col_grid = np.dstack((np.zeros_like(x),x, y))
+            name='GB'
+        
+        fig = plt.figure(figsize=(1,1))
+        ax = fig.add_axes([0,0,1,1])
+        # plot 
+        plt.imshow(col_grid,
+        extent = (0,1,0,1),
+        origin = 'lower')
+        ax.axis('off')
+
+        rgb_fn = op.join(op.split(cortex.database.default_filestore)[
+                            0], 'colormaps', 'costum2D_'+name+'_bins_%d.png'%bins)
+
+        plt.savefig(rgb_fn, dpi = 200)
+        
+        return rgb_fn  
+
     def get_weighted_mean_bins(self, data_df, x_key = 'ecc', y_key = 'size', 
                            sort_key = 'ecc', weight_key = 'rsq', n_bins = 10):
 
@@ -411,14 +770,14 @@ class somaViewer(Viewer):
         """
 
         # need to initialize parent class (Model), indicating output infos
-        super().__init__(pysub = pysub)
+        super().__init__(pysub = pysub, derivatives_pth = somaModelObj.MRIObj.derivatives_pth)
 
         # set object to use later on
         self.somaModelObj = somaModelObj
 
         # if output dir not defined, then make it in derivatives
         if outputdir is None:
-            self.outputdir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots')
+            self.outputdir = op.join(self.derivatives_pth, 'plots')
         else:
             self.outputdir = outputdir
 
@@ -682,7 +1041,7 @@ class somaViewer(Viewer):
         os.makedirs(fig_pth, exist_ok = True)
 
         # get ROI color map
-        atlas_rgb_dict = self.somaModelObj.get_atlas_roi_df(return_RGBA = True)
+        atlas_rgb_dict = self.get_atlas_roi_df(return_RGBA = True)
 
         # plot flatmap
         glasser = cortex.VertexRGB(np.array(atlas_rgb_dict['R']),
@@ -755,7 +1114,7 @@ class somaViewer(Viewer):
         """
 
         ## load atlas ROI df
-        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+        self.get_atlas_roi_df(return_RGBA = False)
 
         # loop over participant list
         r2_all = []
@@ -798,7 +1157,7 @@ class somaViewer(Viewer):
         for region in all_rois.keys():
             
             # get roi vertices for BH
-            roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+            roi_vertices_BH = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
                                                     roi_list = all_rois[region],
                                                     hemi = 'BH')
 
@@ -839,14 +1198,14 @@ class somaViewer(Viewer):
         """
         
         ## load atlas ROI df
-        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+        self.get_atlas_roi_df(return_RGBA = False)
 
         ## use CS as major axis for ROI coordinate rotation
-        ref_theta = self.somaModelObj.get_rotation_angle(self.somaModelObj.atlas_df, 
+        ref_theta = self.get_rotation_angle(self.somaModelObj.atlas_df, 
                                             roi_list = self.somaModelObj.MRIObj.params['plotting']['soma']['reference_roi'])
 
         ## get surface x and y coordinates
-        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
                                                                         merge = True)
 
         # loop over participant list
@@ -916,10 +1275,10 @@ class somaViewer(Viewer):
             roi_vertices = {}
             roi_coords = {}
             for hemi in self.hemi_labels:
-                roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                roi_vertices[hemi] = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
                                                     roi_list = all_rois[roi2plot],
                                                     hemi = hemi)
-                roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                roi_coords[hemi] = self.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
                                                                                         y_coord_surf[roi_vertices[hemi]])), 
                                                                     theta = ref_theta[hemi],
                                                                     fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
@@ -1435,7 +1794,7 @@ class somaViewer(Viewer):
                                                     custom_dm = custom_dm, keep_b_evs = keep_b_evs)
 
         ## load atlas ROI df
-        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+        self.get_atlas_roi_df(return_RGBA = False)
 
         ## load COM values and plot
         if region == 'face':
@@ -1458,7 +1817,7 @@ class somaViewer(Viewer):
             for region, region_label in all_rois.items():
                 
                 # get roi vertices for BH
-                roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                roi_vertices_BH = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
                                                         roi_list = region_label,
                                                         hemi = 'BH')
 
@@ -1492,7 +1851,7 @@ class somaViewer(Viewer):
                 for region, region_label in all_rois.items():
                     
                     # get roi vertices for BH
-                    roi_vertices_BH = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                    roi_vertices_BH = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
                                                             roi_list = region_label,
                                                             hemi = 'BH')
 
@@ -1543,14 +1902,14 @@ class somaViewer(Viewer):
                                 'coordinates_std': [], 'COM': [], 'COM_std': [], 'movement_region': []})
 
         ## load atlas ROI df
-        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+        self.get_atlas_roi_df(return_RGBA = False)
 
         ## use CS as major axis for ROI coordinate rotation
-        ref_theta = self.somaModelObj.get_rotation_angle(self.somaModelObj.atlas_df, 
+        ref_theta = self.get_rotation_angle(self.somaModelObj.atlas_df, 
                                             roi_list = self.somaModelObj.MRIObj.params['plotting']['soma']['reference_roi'])
 
         ## get surface x and y coordinates
-        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
                                                                         merge = True)
 
         ## loop over participant list
@@ -1617,11 +1976,11 @@ class somaViewer(Viewer):
                 roi_vertices = {}
                 roi_coords = {}
                 for hemi in self.hemi_labels:
-                    roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                    roi_vertices[hemi] = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
                                                         roi_list = all_rois[roi2plot],
                                                         hemi = hemi)
                     ## get FS coordinates for each ROI vertex
-                    roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                    roi_coords[hemi] = self.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
                                                                                             y_coord_surf[roi_vertices[hemi]])), 
                                                                         fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
                                                                         theta = ref_theta[hemi],
@@ -1713,14 +2072,14 @@ class somaViewer(Viewer):
                                 'center': [], 'size': [], 'slope': [], 'RF_r2': [], 'r2': [], 'movement_region': []})
 
         ## load atlas ROI df
-        self.somaModelObj.get_atlas_roi_df(return_RGBA = False)
+        self.get_atlas_roi_df(return_RGBA = False)
 
         ## use CS as major axis for ROI coordinate rotation
-        ref_theta = self.somaModelObj.get_rotation_angle(self.somaModelObj.atlas_df, 
+        ref_theta = self.get_rotation_angle(self.somaModelObj.atlas_df, 
                                             roi_list = self.somaModelObj.MRIObj.params['plotting']['soma']['reference_roi'])
 
         ## get surface x and y coordinates
-        x_coord_surf, y_coord_surf, _ = self.somaModelObj.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = self.somaModelObj.MRIObj.params['processing']['space'], 
                                                                         merge = True)
 
         ## loop over participant list
@@ -1781,11 +2140,11 @@ class somaViewer(Viewer):
                 roi_vertices = {}
                 roi_coords = {}
                 for hemi in self.hemi_labels:
-                    roi_vertices[hemi] = self.somaModelObj.get_roi_vert(self.somaModelObj.atlas_df, 
+                    roi_vertices[hemi] = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
                                                         roi_list = all_rois[roi2plot],
                                                         hemi = hemi)
                     ## get FS coordinates for each ROI vertex
-                    roi_coords[hemi] = self.somaModelObj.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
+                    roi_coords[hemi] = self.transform_roi_coords(np.vstack((x_coord_surf[roi_vertices[hemi]], 
                                                                                             y_coord_surf[roi_vertices[hemi]])), 
                                                                         fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'plots', 'PCA_ROI'), 
                                                                         theta = ref_theta[hemi],
@@ -1837,14 +2196,14 @@ class pRFViewer(Viewer):
         """
 
         # need to initialize parent class (Model), indicating output infos
-        super().__init__(pysub = pysub)
+        super().__init__(pysub = pysub, derivatives_pth = pRFModelObj.MRIObj.derivatives_pth)
 
         # set object to use later on
         self.pRFModelObj = pRFModelObj
 
         # if output dir not defined, then make it in derivatives
         if outputdir is None:
-            self.outputdir = op.join(self.pRFModelObj.MRIObj.derivatives_pth, 'plots')
+            self.outputdir = op.join(self.derivatives_pth, 'plots')
         else:
             self.outputdir = outputdir
 
@@ -3079,5 +3438,143 @@ class pRFViewer(Viewer):
 
         plt.show()
 
+class MultiViewer(Viewer):
 
+    def __init__(self, pRFModelObj = None, somaModelObj = None, outputdir = None, pysub = 'fsaverage'):
+        
+        """__init__
+        constructor for class 
+        
+        Parameters
+        ----------
+        pRFModelObj : soma Model object
+            object from one of the classes defined in soma_model
+        somaModelObj : soma Model object
+            object from one of the classes defined in soma_model
+        outputdir: str
+            path to save plots
+        pysub: str
+            basename of pycortex subject folder, where we drew all ROIs. 
+        """
+
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(pysub = pysub, derivatives_pth = pRFModelObj.MRIObj.derivatives_pth)
+
+        # set object to use later on
+        self.pRFModelObj = pRFModelObj
+        # set object to use later on
+        self.somaModelObj = somaModelObj
+
+        # if output dir not defined, then make it in derivatives
+        if outputdir is None:
+            self.outputdir = op.join(self.derivatives_pth, 'plots')
+        else:
+            self.outputdir = outputdir
     
+
+    def plot_rsq(self, participant_list, fit_type = 'mean_run', prf_model_name = 'gauss', max_ecc_ext = None,
+                                mask_arr = True, rsq_threshold = .2, iterative = True):
+                                            
+        """
+        plot flatmap of data for visual vs motor (2D)
+        with R2 estimates for subject (or group)
+
+        Parameters
+        ----------
+        participant_list: list
+            list with participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out) 
+        """
+
+        # loop over participant list
+        avg_r2_soma = []
+        group_estimates = {} # stores estimates for all participants in dict, for ease of access
+
+        for pp in participant_list:
+
+            ## LOAD MOTOR R2 ##
+            print('Loading Motor R2')
+
+            if fit_type == 'loo_run':
+                # get all run lists
+                run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(pp, 
+                                                            file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
+
+                ## get average beta values (all used in GLM)
+                _, r2 = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list)
+            else:
+                # load GLM estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+                r2 = soma_estimates['r2']
+            # append r2
+            avg_r2_soma.append(r2[np.newaxis,...])
+
+            ## LOAD pRF R2 ##
+            print('Loading iterative estimates')
+
+            ## load estimates
+            pp_prf_est_dict, pp_prf_models = self.pRFModelObj.load_pRF_model_estimates(pp, 
+                                                                                fit_type = fit_type, 
+                                                                                model_name = prf_model_name, 
+                                                                                iterative = iterative, 
+                                                                                fit_hrf = self.pRFModelObj.fit_hrf)
+
+            ## mask the estimates, if such is the case
+            if mask_arr:
+                print('masking estimates')
+                # get estimate keys
+                keys = self.pRFModelObj.get_prf_estimate_keys(prf_model_name = prf_model_name)
+
+                # get screen limits
+                max_ecc_ext = pp_prf_models['sub-{sj}'.format(sj = pp)]['prf_stim'].screen_size_degrees/2
+
+                group_estimates['sub-{sj}'.format(sj = pp)] = self.pRFModelObj.mask_pRF_model_estimates(pp_prf_est_dict, 
+                                                                            ROI = None,
+                                                                            estimate_keys = keys,
+                                                                            x_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                            y_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                            rsq_threshold = rsq_threshold,
+                                                                            pysub = self.pysub
+                                                                            )
+            else:
+                group_estimates['sub-{sj}'.format(sj = pp)] = pp_prf_est_dict
+
+        # average across group
+        avg_r2_soma = np.nanmedian(np.vstack(avg_r2_soma), axis = 0)
+        avg_r2_pRF = np.nanmedian(np.stack((group_estimates['sub-{sj}'.format(sj = pp)]['r2'] for pp in participant_list)), axis = 0)
+
+        # replace nans with 0
+        avg_r2_soma[np.isnan(avg_r2_soma)] = 0
+        avg_r2_pRF[np.isnan(avg_r2_pRF)] = 0
+
+        # set figures path
+        figures_pth = op.join(self.outputdir, 'rsq', 'Both', fit_type)
+
+        ## plot flatmap whole suface
+        if len(participant_list) == 1: # if one participant
+            fig_name = op.join(figures_pth, 'sub-{sj}'.format(sj = participant_list[0]), 
+                                    'sub-{sj}_task-Both_pRFmodel-{model}_flatmap_RSQ.png'.format(sj = pp,
+                                                                                                model = prf_model_name))                                   
+        else:
+            fig_name = op.join(figures_pth,
+                                 'sub-group_task-Both_pRFmodel-{model}_flatmap_RSQ.png'.format(model = prf_model_name))
+
+        # create costume colormp red blue
+        n_bins = 256
+        col2D_name = op.splitext(op.split(self.make_2D_colormap(rgb_color='110',bins = n_bins,scale=[1,0.65]))[-1])[0]
+        print('created costum colormap %s'%col2D_name)
+
+        ## plot and save fig for whole surface
+        flatmap = self.plot_flatmap(avg_r2_pRF, 
+                            est_arr2 = avg_r2_soma,
+                            cmap = col2D_name, 
+                            vmin1 = 0.2, vmax1 = .3, 
+                            vmin2 = 0.2, vmax2 = .8, 
+                            fig_abs_name = fig_name,
+                            figsize=(20,5), dpi=300)
+

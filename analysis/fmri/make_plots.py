@@ -13,7 +13,7 @@ from preproc_mridata import MRIData
 from soma_model import GLM_Model, somaRF_Model
 from prf_model import prfModel
 
-from viewer import somaViewer, pRFViewer
+from viewer import somaViewer, pRFViewer, MultiViewer
 
 # defined command line options
 # this also generates --help and error handling
@@ -48,11 +48,17 @@ CLI.add_argument("--cmd",
                 help = 'What plot to make?\n Options: COM_maps, glmsing_tc, glmsing_hex  '
                 )
 
-CLI.add_argument("--model",
+CLI.add_argument("--prf_model",
                 #nargs="*",
                 type=str,  # any type/callable can be used here
-                required=True,
-                help = 'What model to use?\n Options: glm, glmsingle, somaRF, gauss '
+                default = 'gauss',
+                help = 'What model to use?\n Options: gauss '
+                )
+CLI.add_argument("--soma_model",
+                #nargs="*",
+                type=str,  # any type/callable can be used here
+                default = 'glm',
+                help = 'What model to use?\n Options: glm, glmsingle, somaRF '
                 )
 
 CLI.add_argument("--task",
@@ -73,7 +79,7 @@ sj = args.subject[0] if len(args.subject) == 1 else args.subject # for situation
 system_dir = args.system
 exclude_sj = args.exclude
 py_cmd = args.cmd
-model_name = args.model
+model_name = {'prf': args.prf_model, 'soma': args.soma_model}
 task = args.task
 run_type = args.run_type
 
@@ -82,47 +88,51 @@ Visuomotor_data = MRIData(params, sj,
                         base_dir = system_dir, 
                         exclude_sj = exclude_sj)
 
+## pRF ##
+
+# load data model
+data_pRF_model = prfModel(Visuomotor_data)
+
+# set model to be used
+data_pRF_model.model_type = model_name['prf']
+
+## SOMA ##
+
+# load data model
+data_soma_model = GLM_Model(Visuomotor_data)
+
+# if we want nilearn dm or custom 
+custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
+
+if model_name['soma'] == 'somaRF':
+    ## make RF model object
+    data_RFmodel = somaRF_Model(Visuomotor_data)
+else:
+    data_RFmodel = None
+
+
 # if running prf analysis
 if task in ['pRF', 'prf']:
 
-    # load data model
-    data_model = prfModel(Visuomotor_data)
-
-    # set model to be used
-    data_model.model_type = model_name
-
     ## initialize plotter
-    plotter = pRFViewer(data_model)
+    plotter = pRFViewer(data_pRF_model)
 
     if py_cmd == 'show_click':
 
         plotter.open_click_viewer(Visuomotor_data.sj_num[0], fit_type = run_type, 
-                                            prf_model_name = model_name, 
+                                            prf_model_name = model_name['prf'], 
                                             mask_arr = True, rsq_threshold = .2)
         
     elif py_cmd == 'prf_estimates':
 
         plotter.plot_prf_results(participant_list = Visuomotor_data.sj_num, 
-                                fit_type = run_type, prf_model_name = model_name,
+                                fit_type = run_type, prf_model_name = model_name['prf'],
                                 mask_arr = True, rsq_threshold = .2, iterative = True)
 
 elif task == 'soma':
 
-    # load data model
-    data_model = GLM_Model(Visuomotor_data)
-
-    # if we want nilearn dm or custom 
-    custom_dm = True if Visuomotor_data.params['fitting']['soma']['use_nilearn_dm'] == False else False 
-
-    if model_name == 'somaRF':
-        ## make RF model object
-        data_RFmodel = somaRF_Model(Visuomotor_data)
-    else:
-        data_RFmodel = None
-
-
     ## initialize plotter
-    plotter = somaViewer(data_model)
+    plotter = somaViewer(data_soma_model)
 
     ## run command
     if py_cmd == 'COM_maps': # center of mass maps for standard GLM over average of runs
@@ -166,11 +176,20 @@ elif task == 'soma':
 
     elif py_cmd == 'show_click':
 
-        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name, 
+        plotter.open_click_viewer(Visuomotor_data.sj_num[0], custom_dm = custom_dm, model2plot = model_name['soma'], 
                                             data_RFmodel = data_RFmodel, keep_b_evs = Visuomotor_data.params['fitting']['soma']['keep_b_evs'])
 
 
 
+elif task == 'both':
+
+    ## initialize plotter
+    plotter = MultiViewer(pRFModelObj = data_pRF_model, somaModelObj = data_soma_model,
+                        pysub = 'fsaverage4drawing')
     
+    if py_cmd == 'rsq':
+
+        plotter.plot_rsq(Visuomotor_data.sj_num, fit_type = run_type, prf_model_name = model_name['prf'], 
+                            rsq_threshold = .2)
 
     

@@ -12,6 +12,8 @@ from nilearn.glm.first_level import make_first_level_design_matrix
 from nilearn.plotting import plot_design_matrix
 from nilearn.glm.first_level.hemodynamic_models import spm_hrf, spm_time_derivative, spm_dispersion_derivative
 
+from statsmodels.stats.multitest import fdrcorrection
+
 import datetime
 
 from visuomotor_utils import leave_one_out, COM
@@ -279,261 +281,6 @@ class somaModel:
         else:
             return cb, effect_var
 
-    def get_atlas_roi_df(self, annot_pth = None, hemi_labels = {'lh': 'L', 'rh': 'R'}, 
-                                base_str = 'HCP-MMP1.annot', hemi_vert_num = 163842, return_RGBA = False):
-
-        """
-        Get all atlas ROI labels and vertex indices, for both hemispheres
-        and return it as pandas DF
-
-        Assumes Glasser atlas (2016), might generalize to others in the future
-        
-        Parameters
-        ----------
-        annot_pth: str
-            absolute path to atlas annotation files
-        hemi_labels: dict
-            key value pair of hemi labels (key: label for annot file, value: hemisphere label we will use later)
-        base_str: str
-            base name for annotation file
-        hemi_vert_num: int
-            number of vertices in one hemisphere (for bookeeping)  
-        return_RGBA: bool
-            if we want to return rgbt(a) as used in Glasser atlas figures, for each vertex
-        """
-
-        if annot_pth is None:
-            annot_pth = op.join(self.MRIObj.derivatives_pth, 'atlas', 'Glasser_et_al_2016_HCP_MMP1.0_qN_RVVG',
-                            'HCP_PhaseTwo', 'Q1-Q6_RelatedParcellation210','MNINonLinear','fsaverage_LR32k')
-
-        # make empty rgb dict (although we might not use it)
-        atlas_rgb_dict = {'R': [], 'G': [], 'B': [], 'A': []}
-
-        # fill atlas dataframe per hemi
-        atlas_df = pd.DataFrame({'ROI': [], 'hemi_vertex': [], 'merge_vertex': [], 'hemisphere': []})
-
-        for hemi in hemi_labels.keys():
-            
-            # get annotation file for hemisphere
-            annotfile = [op.join(annot_pth,x) for x in os.listdir(annot_pth) if base_str in x and hemi in x][0]
-            print('Loading annotations from %s'%annotfile)
-
-            # read annotation file, save:
-            # labels - annotation id at each vertex.
-            # ctab - RGBT + label id colortable array.
-            # names - The names of the labels
-            h_labels, h_ctab, h_names = nib.freesurfer.io.read_annot(annotfile)
-
-            # get labels as strings
-            label_inds_names = [[ind, re.split('_', str(name))[1]] for ind,name in enumerate(h_names) if '?' not in str(name)]
-    
-            # fill df for each hemi roi
-            for hemi_roi in label_inds_names:
-                
-                # vertice indices for that roi in that hemisphere
-                hemi_roi_verts = np.where((h_labels == hemi_roi[0]))[0]
-                # and for full surface
-                surf_roi_verts = hemi_roi_verts + hemi_vert_num if hemi_labels[hemi] == 'R' else hemi_roi_verts
-                
-                atlas_df = pd.concat((atlas_df,
-                                    pd.DataFrame({'ROI': np.tile(hemi_roi[-1], len(hemi_roi_verts)), 
-                                                'hemi_vertex': hemi_roi_verts, 
-                                                'merge_vertex': surf_roi_verts, 
-                                                'hemisphere': np.tile(hemi_labels[hemi], len(hemi_roi_verts))})
-                                    
-                                    ),ignore_index=True)
-
-            # if we want RGB + A save values, 
-            # scaled to go from 0-1 (for pycortex plotting) and to have alpha and not T
-            if return_RGBA:
-                for _,lbl in enumerate(h_labels):
-                    atlas_rgb_dict['R'].append(h_ctab[lbl,0]/255) 
-                    atlas_rgb_dict['G'].append(h_ctab[lbl,1]/255) 
-                    atlas_rgb_dict['B'].append(h_ctab[lbl,2]/255) 
-                    atlas_rgb_dict['A'].append((255 - h_ctab[lbl,3])/255) 
-                
-        # allow to be used later one
-        self.atlas_df = atlas_df
-
-        if return_RGBA:
-            return atlas_rgb_dict
-
-    def get_roi_vert(self, roi_df, roi_list = [], hemi = 'BH'):
-
-        """
-        get vertex indices for an ROI, given an ROI df (usually for atlas, but not necessarily)
-        and a list of labels
-        for a specific hemisphere (or both)
-        
-        Parameters
-        ----------
-        roi_df: pd DataFrame
-            dataframe with all ROIs names, hemispheres and vertices
-        roi_list: list
-            list of strings with ROI labels to load
-        hemi: str
-            which hemisphere (LH, RH or BH - both)
-        """
-
-        roi_vert = []
-
-        for roi2plot in roi_list:
-            if hemi == 'BH':
-                roi_vert += list(roi_df[roi_df['ROI'] == roi2plot].merge_vertex.values.astype(int))
-            else:
-                roi_vert += list(roi_df[(roi_df['ROI'] == roi2plot) & \
-                                (roi_df['hemisphere'] == hemi[0])].merge_vertex.values.astype(int))
-
-        return np.array(roi_vert)
-
-    def transform_roi_coords(self, orig_coords, fig_pth = None, roi_name = '', theta = None):
-
-        """
-        Use PCA to rotate x,y ROI coordinates along major axis (usually y)
-        NOTE - Assumes we are providing ROI from 1 hemisphere only
-        
-        Parameters
-        ----------
-        orig_coords: arr
-            x,y coordinate array for ROI [2, vertex]
-        fig_pth: str
-            if provided, will plot some sanity check plots and save in absolute dir
-        roi_name: str
-            roi name, used when fig_pth is not None
-        theta: float
-            rotation angle, if None will calculate relative to major component axis
-        """
-
-        ## center the coordinates (to have zero mean)
-        roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
-                                        orig_coords[1] - np.mean(orig_coords[1])))
-
-        ## get covariance matrix and eigen vector and values
-        cov = np.cov(roi_coord_zeromean)
-        evals, evecs = np.linalg.eig(cov)
-
-        # Sort eigenvalues in decreasing order
-        sort_indices = np.argsort(evals)[::-1]
-        x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
-        x_v2, y_v2 = evecs[:, sort_indices[1]]
-
-        # rotate
-        if theta is None:
-            theta = np.arctan((x_v1)/(y_v1))  
-        else:
-            print('using input theta value')
-        rotation_mat = np.matrix([[np.cos(theta), -np.sin(theta)],
-                                    [np.sin(theta), np.cos(theta)]])
-        transformed_mat = rotation_mat * roi_coord_zeromean
-
-        # get transformed coordenates
-        x_transformed, y_transformed = transformed_mat.A
-        roi_coord_transformed = np.vstack((x_transformed, y_transformed))
-
-        if fig_pth is not None:
-            
-            # if output path doesn't exist, create it
-            os.makedirs(fig_pth, exist_ok = True)
-
-            # plot zero centered ROI and major axis 
-            fig, axes = plt.subplots(1,3, figsize=(18,4))
-
-            axes[0].scatter(orig_coords[0], orig_coords[1])
-            axes[0].axis('equal')
-            axes[0].set_title('ROI original coords')
-            
-            scale = 20
-            axes[1].plot([x_v1*-scale*2, x_v1*scale*2],
-                        [y_v1*-scale*2, y_v1*scale*2], color='red')
-            axes[1].plot([x_v2*-scale, x_v2*scale],
-                        [y_v2*-scale, y_v2*scale], color='blue')
-            axes[1].scatter(roi_coord_zeromean[0],
-                            roi_coord_zeromean[1])
-            axes[1].axis('equal')
-            axes[1].set_title('ROI zero mean + major axis')
-
-            axes[2].plot(roi_coord_zeromean[0],
-                        roi_coord_zeromean[1], 'b.', alpha=.1)
-            axes[2].plot(roi_coord_transformed[0],
-                        roi_coord_transformed[1], 'g.')
-            axes[2].axis('equal')
-            axes[2].set_title('ROI rotated')
-
-            fig.savefig(op.join(fig_pth, 'ROI_PCA_%s.png'%roi_name))
-
-        return roi_coord_transformed
-
-    def get_rotation_angle(self, roi_df, roi_list = []):
-
-        """
-        given a reference ROI, use PCA to find major axis (usually y),
-        and get theta angle value, that is used to build rotation matrix
-        
-        Parameters
-        ----------
-        roi_df: pd DataFrame
-            dataframe with all ROIs names, hemispheres and vertices
-        roi_list: list
-            list of strings with ROI labels to load
-        """
-        ## get surface x and y coordinates, for each hemisphere
-        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = self.MRIObj.params['processing']['space'], 
-                                                                merge = True)
-
-        ref_theta = {}
-        for hemi in ['LH', 'RH']:
-            # get vertex indices for selected ROI and hemisphere
-            ref_roi_vert = self.get_roi_vert(roi_df, roi_list = roi_list, hemi = hemi)
-
-            # x,y coordinate array for ROI [2, vertex]
-            orig_coords = np.vstack((x_coord_surf[ref_roi_vert], 
-                                      y_coord_surf[ref_roi_vert]))
-
-            ## center the coordinates (to have zero mean)
-            roi_coord_zeromean = np.vstack((orig_coords[0] - np.mean(orig_coords[0]),
-                                            orig_coords[1] - np.mean(orig_coords[1])))
-
-            ## get covariance matrix and eigen vector and values
-            cov = np.cov(roi_coord_zeromean)
-            evals, evecs = np.linalg.eig(cov)
-
-            # Sort eigenvalues in decreasing order
-            sort_indices = np.argsort(evals)[::-1]
-            x_v1, y_v1 = evecs[:, sort_indices[0]]  # Eigenvector with largest eigenvalue
-            x_v2, y_v2 = evecs[:, sort_indices[1]]
-
-            # calculate theta
-            ref_theta[hemi] = np.arctan((x_v1)/(y_v1))  
-
-        return ref_theta
-
-    def get_fs_coords(self, pysub = 'fsaverage', merge = True):
-
-        """
-        get freesurfer surface mesh coordinates
-
-        Parameters
-        ----------
-        pysub: str
-            pycortex sub name
-        merge: bool
-            if we are merging both hemispheres, and hence getting coordinates for both combined or separate
-        """
-
-        ## FreeSurfer surface file format: Contains a brain surface mesh in a binary format
-        # Such a mesh is defined by a list of vertices (each vertex is given by its x,y,z coords) 
-        # and a list of faces (each face is given by three vertex indices)
-
-        if merge:
-            pts, polys = cortex.db.get_surf(pysub, 'flat', merge=True)
-
-            return pts[:,0], pts[:,1], pts[:,2] # [vertex, axis] --> x, y, z
-        else:
-            left, right = cortex.db.get_surf(pysub, 'flat', merge=False)
-
-            return {'LH': [left[0][:,0], left[0][:,1], left[0][:,2]],
-                    'RH': [right[0][:,0], right[0][:,1], right[0][:,2]]} # [vertex, axis] --> x, y, z
-
     def get_avg_events(self, participant, keep_b_evs = False):
 
         """ get events for participant (averaged over runs)
@@ -682,6 +429,61 @@ class somaModel:
             out_arr = interp(desired_scale)
         
         return out_arr
+
+    def get_Fstat(self, data, rmodel_pred = None, fmodel_pred = None, num_regs = None):
+
+        """
+        Calculate goodness of fit F stat for full vs simple model
+        
+        Parameters
+        ----------
+        data : arr
+            data
+        rmodel_pred: arr
+            reduced model prediction (model with intercept only)
+        fmodel_pred: arr
+            full model prediction (all regressors + intercept) 
+        num_regs: int
+            number of regressors of full model       
+        """
+
+        # calculate sum of squared residuals
+        rss_1 = np.nansum((data - rmodel_pred) ** 2, axis = -1) # simple model
+        rss_2 = np.nansum((data - fmodel_pred) ** 2, axis = -1) # complex model
+
+        # F-statistic
+        # model 1 is nested in model 2, so F will always be positive
+        F_stat = ((rss_1 - rss_2)/(num_regs - 1))/(rss_2/(data.shape[-1] - num_regs))
+
+        # get corresponing p values
+        p_values_F = 1 - scipy.stats.f.cdf(F_stat, dfn = num_regs - 1, dfd = data.shape[-1] - num_regs)
+
+        return F_stat, p_values_F
+
+    def fdr_correct(self, alpha_fdr = 0.01, p_values = None, stat_values = None):
+
+        """
+        Calculate False Discovery Rate for a given statistic and p-values
+        returns corrected statistic (masking non-significant values with nan)
+
+        Parameters
+        ----------
+        alpha_fdr : float
+            alpha level [default 0.01 (1%)] 
+        p_values: arr
+            p-values
+        stat_values: arr
+            statistic value to be corrected      
+        """
+
+        # The fdrcorrection function already returns a "mask"
+        fdr_mask = fdrcorrection(p_values, alpha=alpha_fdr)[0]
+        fdr_mask = fdr_mask.reshape(p_values.shape)
+
+        fdr_stat_vals = stat_values.copy() 
+        fdr_stat_vals[~fdr_mask] = np.nan
+
+        return fdr_stat_vals
 
 
 class GLM_Model(somaModel):
@@ -1569,7 +1371,99 @@ class GLM_Model(somaModel):
 
         return region_mask # note, for face is array, for upper_limb is dict with mask for each side (or both)
 
+    def f_goodness_of_fit(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'mean_run',
+                                keep_b_evs = False, alpha_fdr = 0.01):
 
+        """ Calculate F value for participant
+        Comparing full model vs reduced model (only intercept)
+        Requires GLM fitting to have been done before
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID  
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)   
+        custom_dm: bool
+            if we are defining DM manually (this is, using specifc HRF), or using nilearn function for DM
+        keep_b_evs: bool
+            if we want to specify regressors for simultaneous movement or not (ex: both hands)    
+        hrf_model: str
+            type of hrf to use (when custom_hrf = False)         
+        """
+
+        ## make new out dir, depeding on our HRF approach
+        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
+                                        'sub-{sj}'.format(sj = participant), 'F_stat', fit_type)
+        # if output path doesn't exist, create it
+        os.makedirs(out_dir, exist_ok = True)
+
+        # get list with gii files
+        gii_filenames = self.get_soma_file_list(participant, 
+                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+        
+        if fit_type == 'mean_run':         
+            # load data of all runs and average
+            data2fit = self.load_data4fitting(gii_filenames, average = True)[np.newaxis,...] # [1, vertex, TR]
+
+        elif fit_type == 'loo_run':
+            # get all run lists
+            run_loo_list = self.get_run_list(gii_filenames)
+
+            # leave one run out, load others and average
+            data2fit = []
+            for lo_run_key in run_loo_list:
+                print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
+                data2fit.append(self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file], 
+                                                        average = True)[np.newaxis,...])
+            data2fit = np.vstack(data2fit) # [runs, vertex, TR]
+
+        ## Get DM
+        design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 
+                                                custom_dm = custom_dm, nTRs = data2fit.shape[-1], 
+                                                hrf_model = hrf_model)
+
+        for rind, data in enumerate(data2fit):
+
+            # fit intercept only model
+
+            # set filename to save estimates
+            if fit_type == 'mean_run':      
+                estimates_filename = op.join(out_dir, 'reduced_model_run-mean.npy')
+                stats_filename = op.join(out_dir, 'Fstat_run-mean.npy')
+            elif fit_type == 'loo_run':
+                estimates_filename = op.join(out_dir, 'reduced_model_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2)))
+                stats_filename = op.join(out_dir, 'Fstat_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2)))
+
+            if not op.isfile(estimates_filename):
+                reduced_model_params = Parallel(n_jobs=16)(delayed(self.fit_glm_tc)(vert, 
+                                                                                    design_matrix['constant'].values[..., np.newaxis]) for _,vert in enumerate(data))
+
+                reduced_model = {}
+                reduced_model['prediction'] = np.array([reduced_model_params[i][0] for i in range(data.shape[0])])
+                reduced_model['betas'] = np.array([reduced_model_params[i][1] for i in range(data.shape[0])])
+                reduced_model['r2'] = np.array([reduced_model_params[i][2] for i in range(data.shape[0])])
+                reduced_model['mse'] = np.array([reduced_model_params[i][3] for i in range(data.shape[0])])
+
+                # save estimates dict
+                np.save(estimates_filename, reduced_model)
+            else:
+                reduced_model = np.load(estimates_filename, allow_pickle=True).item()
+
+            ## load full model prediction
+            full_model = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+
+            ## now calculate F stat
+            F_stat, p_values_F = self.get_Fstat(data, rmodel_pred = reduced_model['prediction'], 
+                                                fmodel_pred = full_model['prediction'], 
+                                                num_regs = len([val for val in design_matrix.columns if 'constant' not in val]))
+            
+            # and do FDR correction
+            F_stat_fdr = self.fdr_correct(alpha_fdr = alpha_fdr, p_values = p_values_F, stat_values = F_stat)
+
+            np.save(stats_filename, {'Fstat': F_stat, 'p_val': p_values_F, 'Fstat_FDR': F_stat_fdr})
 
 
 class somaRF_Model(somaModel):
