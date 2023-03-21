@@ -67,7 +67,6 @@ class Viewer:
         # ADD ROI TO OVERLAY
         cortex.utils.add_roi(flatmap, name = name, open_inkscape=False)
 
-
     def get_atlas_roi_df(self, annot_pth = None, hemi_labels = {'lh': 'L', 'rh': 'R'}, 
                                 base_str = 'HCP-MMP1.annot', return_RGBA = False):
 
@@ -178,7 +177,7 @@ class Viewer:
     def get_roi_vert_list(self, roi_df, roi_list = [], hemi = 'BH'):
 
         """
-        get vertex indices for an ROI, given an ROI df (usually for atlas, but not necessarily)
+        get vertex indices for an ROI, given an ROI df (usually for atlas)
         and a list of labels
         for a specific hemisphere (or both)
         
@@ -752,6 +751,56 @@ class Viewer:
 
         return mean_x, mean_x_std, mean_y, mean_y_std
 
+    def get_ROI_verts_dict(self, ROIs = None, pysub = None, split_hemi = False):
+
+        """
+        Helper function to get pRF ROI vertices
+        to be used in plotting
+
+        Parameters
+        ----------
+        ROIs : list/arr/str
+            list with ROI names. 
+            if string, then will look for ROI names with that string in it (also works with regex expression)
+        pysub : pycortex subject
+            pycortex subject where ROIs are drawn
+        split_hemi: bool
+            split into hemispheres?
+        """
+
+        # if pycortex subject not specified
+        if pysub is None:
+            pysub = self.pysub
+        
+        # load all ROI vertices
+        all_roi_verts = cortex.get_roi_verts(pysub)
+
+        ## subselect
+        # if we input list of ROIs
+        if isinstance(ROIs,list) or isinstance(ROIs, np.ndarray): 
+            roi_verts = {key: all_roi_verts[key] for key in ROIs}
+        
+        # if we give reference string
+        elif isinstance(ROIs, str): 
+            rnames = [val for val in all_roi_verts.keys() if len(re.findall(ROIs, val)) > 0] 
+            #[val for val in all_roi_verts.keys() if ROIs in val]
+            roi_verts = {key: all_roi_verts[key] for key in rnames}
+        
+        # if we want all ROIs in overlay
+        else: 
+            roi_verts = all_roi_verts
+
+        if split_hemi:
+            ## get mid vertex index (diving hemispheres)
+            left_index = cortex.db.get_surfinfo(pysub).left.shape[0] 
+            LH_roi_verts = {key: roi_verts[key][roi_verts[key] < left_index] for key in roi_verts.keys()}
+            RH_roi_verts = {key: roi_verts[key][roi_verts[key] >= left_index] for key in roi_verts.keys()}
+            
+            return LH_roi_verts, RH_roi_verts
+        else:
+            return roi_verts
+
+    
 class somaViewer(Viewer):
 
     def __init__(self, somaModelObj, outputdir = None, pysub = 'fsaverage'):
@@ -2415,22 +2464,6 @@ class pRFViewer(Viewer):
 
         return df_est
 
-    def get_ROI_verts_dict(self):
-
-        """
-        Helper function to get pRF ROI vertices
-        to be used in plotting
-        """
-
-        # get vertices for subject fsaverage
-        ROIs = self.pRFModelObj.MRIObj.params['plotting']['prf']['ROIs']
-
-        roi_verts = {} #empty dictionary  
-        for _,val in enumerate(ROIs):
-            roi_verts[val] = cortex.get_roi_verts(self.pysub,val)[val]
-
-        return roi_verts
-
     def plot_vertex_tc(self, participant, vertex = None, run_type = 'mean_run', fit_now = True,
                             model2fit = 'gauss', chunk_num = None, ROI = None, fit_hrf = False):
 
@@ -2490,8 +2523,6 @@ class pRFViewer(Viewer):
         axis.legend(handles,labels,loc='upper left',fontsize=15)   
 
         fig.savefig(op.join(fig_pth,'vertex-%i_model-%s_timeseries.png'%(vertex, model2fit)), dpi=100,bbox_inches = 'tight')
-
-
 
     def plot_prf_results(self, participant_list = [], 
                                 fit_type = 'mean_run', prf_model_name = 'gauss', max_ecc_ext = None,
@@ -2559,7 +2590,6 @@ class pRFViewer(Viewer):
         self.plot_VFcoverage(participant_list = participant_list, group_estimates = group_estimates, fit_type = fit_type,
                                             model_name = prf_model_name, figures_pth = figures_pth)
         
-
     def plot_rsq(self, participant_list = [], group_estimates = [], figures_pth = None, 
                         model_name = 'gauss', fit_type = 'mean_run'):
 
@@ -2569,7 +2599,7 @@ class pRFViewer(Viewer):
         """
 
         ## get ROI vertices
-        roi_verts = self.get_ROI_verts_dict()
+        roi_verts = self.get_ROI_verts_dict(ROIs = self.pRFModelObj.MRIObj.params['plotting']['prf']['ROIs'])
 
         # make output folder for figures
         if figures_pth is None:
@@ -2775,7 +2805,7 @@ class pRFViewer(Viewer):
         """
 
         ## get ROI vertices
-        roi_verts = self.get_ROI_verts_dict()
+        roi_verts = self.get_ROI_verts_dict(ROIs = self.pRFModelObj.MRIObj.params['plotting']['prf']['ROIs'])
 
         # make output folder for figures
         if figures_pth is None:
@@ -2885,7 +2915,7 @@ class pRFViewer(Viewer):
         """
 
         ## get ROI vertices
-        roi_verts = self.get_ROI_verts_dict()
+        roi_verts = self.get_ROI_verts_dict(ROIs = self.pRFModelObj.MRIObj.params['plotting']['prf']['ROIs'])
 
         # get mid vertex index (diving hemispheres)
         left_index = cortex.db.get_surfinfo(self.pysub).left.shape[0] 
@@ -3058,7 +3088,7 @@ class pRFViewer(Viewer):
                                     discrete = False, add_alpha = False, return_cmap = True)
         
         ## get ROI vertices
-        roi_verts = self.get_ROI_verts_dict()
+        roi_verts = self.get_ROI_verts_dict(ROIs = self.pRFModelObj.MRIObj.params['plotting']['prf']['ROIs'])
         
         avg_bin_df = pd.DataFrame()
 

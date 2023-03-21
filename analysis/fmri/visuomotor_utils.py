@@ -1538,4 +1538,3 @@ def correlate_arrs(data1_arr, data2_arr, n_jobs = 4, weights=[], shuffle_axis = 
     return correlations
 
 
-    

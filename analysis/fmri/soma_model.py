@@ -485,6 +485,66 @@ class somaModel:
 
         return fdr_stat_vals
 
+    def piecewise_linear(self, x, x0, y0, k1, k2):
+
+        """
+        Calculate piecewise-defined function. 
+        Restricted to two linear segments, that intersect at x0
+        
+        Parameters
+        ----------
+        x : arr
+            input array of x-axis coordinates
+        x0 : float
+            x-position where segments intersect
+        y0 : float
+            y-position where segments intersect
+        k1 : float
+            slope for first segment
+        k2 : float
+            slope for second segment
+        """ 
+        
+        y = np.piecewise(x, [x < x0, x >= x0],
+                        [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
+        
+        return y
+    
+    def fit_piecewise(self, x_data = None, y_data = None, 
+                            x0 = .1, y0 = 4, k1 = 2, k2 = -2, 
+                            bounds = (-np.inf, np.inf), sigma = None):
+
+        """
+        Fit piecewise-defined function on data.
+        [Restricted to two linear segments, that intersect at x0]
+        
+        Parameters
+        ----------
+        x_data : arr
+            x input values to fit
+        y_data : arr
+            y input values to fit
+        bounds: tuple
+            Lower and upper bounds on parameters - see scipy optimize bounds for more info
+        x0 : float
+            initial guess - x-position where segments intersect
+        y0 : float
+            initial guess - y-position where segments intersect
+        k1 : float
+            initial guess - slope for first segment
+        k2 : float
+            initial guess - slope for second segment
+        sigma: arr
+            1D array of uncertainty in ydata, should contain values of standard deviations of errors in ydata
+        """ 
+
+        popt_piecewise, pcov = scipy.optimize.curve_fit(self.piecewise_linear, 
+                                                x_data, y_data, 
+                                                p0 = [x0, y0, k1, k2],
+                                               bounds = bounds,
+                                               sigma = sigma)
+        
+        return popt_piecewise, pcov
 
 class GLM_Model(somaModel):
 
@@ -636,7 +696,7 @@ class GLM_Model(somaModel):
             prediction = dm.dot(betas)
 
             mse = np.mean((voxel - prediction) ** 2) # calculate mean of squared residuals
-            r2 = np.nan_to_num(1 - (np.nansum((voxel - prediction)**2, axis=0)/ np.nansum((voxel**2), axis=0)))# and the rsq
+            r2 = np.nan_to_num(1 - (np.nansum((voxel - prediction)**2, axis=0)/ np.nansum(((voxel - np.mean(voxel))**2), axis=0)))# and the rsq
         
         return prediction, betas, r2, mse
 
