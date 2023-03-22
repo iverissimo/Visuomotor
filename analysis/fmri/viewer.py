@@ -1167,6 +1167,7 @@ class somaViewer(Viewer):
 
         # loop over participant list
         r2_all = []
+        cv_r2_all = []
         for pp in participant_list:
             
             ## LOAD R2
@@ -1177,7 +1178,10 @@ class somaViewer(Viewer):
 
                 ## get average beta values (all used in GLM)
                 _, r2 = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
-                                                            weighted_avg = True, runs2load = run_loo_list)
+                                                            weighted_avg = True, runs2load = run_loo_list, use_cv_r2 = False)
+                _, cv_r2 = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list, use_cv_r2 = True) 
+                cv_r2_all.append(cv_r2[np.newaxis, ...])
             else:
                 # load GLM estimates, and get betas and prediction
                 soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
@@ -1190,29 +1194,39 @@ class somaViewer(Viewer):
             r2_all.append(r2[np.newaxis,...])
         r2_all = np.nanmean(np.vstack(r2_all), axis = 0)
 
+        # set figures path
+        figures_pth = op.join(self.outputdir, 'rsq', 'soma', fit_type)
+
         ## plot flatmap whole suface
         if len(participant_list) == 1: # if one participant
-            fig_name = op.join(self.outputdir, 'glm_r2',
-                                                'sub-{sj}'.format(sj = participant_list[0]), 
-                                                fit_type, 'r2_flatmap.png')
+            fig_name = op.join(figures_pth, 'sub-{sj}'.format(sj = participant_list[0]), 
+                                                 'sub-{sj}_task-soma_flatmap_RSQ.png'.format(sj = pp)) 
         else:
-            fig_name = op.join(self.outputdir, 'glm_r2',
-                                                'group_mean_r2_flatmap_{l}.png'.format(l = fit_type))
+            fig_name = op.join(figures_pth,
+                                 'sub-group_task-soma_flatmap_RSQ.png')
 
         ## plot and save fig for whole surface
-        self.plot_flatmap(r2_all, vmin1 = 0, vmax1 = .6, cmap='hot', fig_abs_name = fig_name)
+        self.plot_flatmap(r2_all, vmin1 = 0, vmax1 = 1, cmap='hot', 
+                                    fig_abs_name = fig_name)
+        
+        if fit_type == 'loo_run':
+            cv_r2_all = np.nanmean(np.vstack(cv_r2_all), axis = 0)
 
-        ## plot flatmap for each region
-        for region in all_rois.keys():
+            ## plot and save fig for whole surface
+            self.plot_flatmap(cv_r2_all, vmin1 = 0, vmax1 = .6, cmap='hot', 
+                                    fig_abs_name = fig_name.replace('RSQ', 'CV_RSQ'))
+
+        # ## plot flatmap for each region
+        # for region in all_rois.keys():
             
-            # get roi vertices for BH
-            roi_vertices_BH = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
-                                                    roi_list = all_rois[region],
-                                                    hemi = 'BH')
+        #     # get roi vertices for BH
+        #     roi_vertices_BH = self.get_roi_vert_list(self.somaModelObj.atlas_df, 
+        #                                             roi_list = all_rois[region],
+        #                                             hemi = 'BH')
 
-            self.plot_flatmap(r2_all, vmin1 = 0, vmax1 = .6, cmap='hot', 
-                                    verts = roi_vertices_BH,
-                                    fig_abs_name = fig_name.replace('.png', '_{r}.png'.format(r=region)))
+        #     self.plot_flatmap(r2_all, vmin1 = 0, vmax1 = .6, cmap='hot', 
+        #                             verts = roi_vertices_BH,
+        #                             fig_abs_name = fig_name.replace('.png', '_{r}.png'.format(r=region)))
             
     def plot_betas_over_y(self, participant_list, fit_type = 'loo_run', keep_b_evs = True,
                                 nr_TRs = 141, roi2plot_list = ['M1', 'S1'], n_bins = 150,

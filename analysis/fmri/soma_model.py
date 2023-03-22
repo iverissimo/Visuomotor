@@ -1084,7 +1084,7 @@ class GLM_Model(somaModel):
             filename = op.join(out_dir, 'fixed_effects_T_{kn}_contrast.npy'.format(kn = key_name))
             np.save(filename, fixed_effects_T[0])
 
-    def average_betas(self, participant, fit_type = 'loo_run', weighted_avg = True, runs2load = [1,2,3,4]):
+    def average_betas(self, participant, fit_type = 'loo_run', weighted_avg = True, runs2load = [1,2,3,4], use_cv_r2 = True):
 
         """
         Helper function to load and average beta values
@@ -1119,7 +1119,7 @@ class GLM_Model(somaModel):
             all_betas.append(soma_estimates['betas'][np.newaxis,...])
             
             # append r2/CV-r2
-            if fit_type == 'loo_run':
+            if fit_type == 'loo_run' and use_cv_r2 == True:
                 tmp_arr = soma_estimates['cv_r2'].copy()
                 tmp_arr[tmp_arr <= 0] = 0 # to remove negative values, that result in unpredictable outcome for weights
                 weight_arr.append(tmp_arr[np.newaxis,...])
