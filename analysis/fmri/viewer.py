@@ -847,13 +847,11 @@ class Viewer:
                                                 pd.DataFrame({'glasser_roi': [glasser_roi], 
                                                                 'roi': [rname], #[int(re.findall('\d{1,2}', rname)[0])], #
                                                                 'hemisphere': [hemi], 
-                                                                'percent_vert': [perc_vert]})
+                                                                'percent_vert': [perc_vert * 100]})
                                                 ), ignore_index = True) 
 
         return df_percent_glasser
 
-
-    
 class somaViewer(Viewer):
 
     def __init__(self, somaModelObj, outputdir = None, pysub = 'fsaverage'):
@@ -932,7 +930,7 @@ class somaViewer(Viewer):
             # fig formating
             fig_title = 'Left Hemisphere' if hemi == 'LH' else 'Right Hemisphere'
             axs[ind].set_title(fig_title, fontsize=20, pad=10)
-            axs[ind].set_ylim(0,1.01) 
+            axs[ind].set_ylim(0,101) 
             axs[ind].set_ylabel('Vertices in Glasser ROI (%)', fontsize=15, labelpad=10)
             axs[ind].set_xlabel('ROI', fontsize=15, labelpad=10)
 
@@ -1059,7 +1057,83 @@ class somaViewer(Viewer):
                 os.makedirs(op.split(fig_name)[0], exist_ok = True)
                 fig.savefig(fig_name)
 
-    
+    def makefig_handband_COM_over_y(self, handband_COM_df, 
+                                    participant_list = [], hemi = 'LH', movement_region = 'R_hand', roi_ind_list = [8,9,10,11],
+                                    r_thresh = .1):
+        
+        """
+        Make figure of COM values vs y coordinates
+        for select handband-ROIs, hemisphere and hand movement
+        across participants
+
+        Parameters
+        ----------
+        handband_COM_df: DataFrame
+            dataframe with COM values for all handband rois
+        participant_list: list
+            list with participant ID 
+        r_thresh: float
+            if putting a rsquare threshold on the data being showed
+        hemi: str
+            hemisphere to focus on
+        movement_region: str
+            movement of right/left or both hands
+        roi_ind_list: list
+            list of handband indices to plot
+        """
+
+        # make custom colormap
+        cmap_hands = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['upper_limb'],
+                                  bins = 256, cmap_name = 'custom_hand', return_cmap = True) 
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+
+        # start fig
+        fig, axs = plt.subplots(len(participant_list), len(roi_ind_list), 
+                                figsize=(int(len(roi_ind_list) * 3.75) ,22), sharex=True, sharey=True)
+
+        # loop over participants
+        for ind, pp in enumerate(participant_list):
+            
+            # plot all columns in row (with values for the participant and handband rois in list)
+            for col_ind, rname in enumerate(roi_names_list):
+                        
+                # subselect relevant part of DF
+                df2plot = handband_COM_df[(handband_COM_df['ROI'] == rname) & \
+                                        (handband_COM_df['hemisphere'] == hemi) & \
+                                        (handband_COM_df['sj'] == pp) & \
+                                        (handband_COM_df['r2'] > r_thresh) & \
+                                        (handband_COM_df['movement_region'] == movement_region)]
+
+                sns.scatterplot(data = df2plot, x = 'y_coordinates', y = 'COM',
+                            hue = 'COM', palette = 'rainbow_r', hue_norm = (0,4), ax = axs[ind][col_ind])
+                axs[ind][col_ind].get_legend().remove()
+                
+                # if first row, set title
+                if pp == participant_list[0]:
+                    axs[ind][col_ind].set_title(rname,fontsize=20, pad=10)
+                
+                elif pp == participant_list[-1]: # if last row, format x ticks and label
+                    
+                    axs[ind][col_ind].set_xlabel('y coordinates (a.u.)', fontsize = 18, labelpad=10)
+                    axs[ind][col_ind].tick_params(axis='x',labelsize=12)
+                
+            # format y ticks and label
+            axs[ind][0].set_ylabel('sub-{sj}\n\nCOM'.format(sj = pp), fontsize = 18, labelpad=10)
+            axs[ind][0].tick_params(axis='y',labelsize=12)
+            
+            # if first row, put legend on the right side (common for all)
+            if ind == 0:
+                axs[ind][-1].legend(bbox_to_anchor=(1.04, 1), fontsize=15, 
+                            handles = [mpatches.Patch(color = cmap_hands(int(256/4*l)), 
+                            label = ['thumb', 'index', 'middle', 'ring', 'pinky'][l]) for l in range(5)])
+
+        fig.subplots_adjust(hspace=0.1,wspace=0.1, right=.82)
+
+        return fig
+
+
     def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None,
                                             fit_type = 'mean_run', keep_b_evs = False, fixed_effects = True):
 
