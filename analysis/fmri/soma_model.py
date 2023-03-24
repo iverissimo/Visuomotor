@@ -505,14 +505,14 @@ class somaModel:
             slope for second segment
         """ 
         
-        y = np.piecewise(x, [x < x0, x >= x0],
+        y = np.piecewise(x, [x < x0],# x >= x0],
                         [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
         
         return y
     
     def fit_piecewise(self, x_data = None, y_data = None, 
                             x0 = .1, y0 = 4, k1 = 2, k2 = -2, 
-                            bounds = (-np.inf, np.inf), sigma = None):
+                            bounds = (-np.inf, np.inf), sigma = None, abs_sigma = False):
 
         """
         Fit piecewise-defined function on data.
@@ -542,9 +542,111 @@ class somaModel:
                                                 x_data, y_data, 
                                                 p0 = [x0, y0, k1, k2],
                                                bounds = bounds,
-                                               sigma = sigma)
+                                               sigma = sigma, absolute_sigma = abs_sigma)
         
-        return popt_piecewise, pcov
+        # get R2 of fit
+        pred_arr = self.piecewise_linear(x_data, *popt_piecewise)
+        r2 = np.nan_to_num(1 - (np.nansum((y_data - pred_arr)**2, axis=0)/ np.nansum(((y_data - np.mean(y_data))**2), axis=0)))
+        
+        return popt_piecewise, pcov, r2
+    
+    def linear_func(self, dm = None, betas = None):
+        return dm.dot(betas)
+
+    def fit_linear(self, data, dm, add_intercept = True):
+
+        """
+        helper func to fit linear function on data.
+        """
+        
+        # check DM shape
+        if len(dm.shape) == 1: 
+            dm = dm.reshape(-1,1)
+        elif dm.shape[-1] > dm.shape[0]: # we want [npoints, betas]
+            dm = dm.T
+
+        # stack intercept
+        if add_intercept: 
+            dm = np.hstack((dm, np.ones(dm.shape)))
+
+        # actually fit
+        betas = np.linalg.lstsq(dm, data, rcond = -1)[0]
+        
+        # get R2 of fit
+        pred_arr = self.linear_func(dm = dm, betas = betas)
+        r2 = np.nan_to_num(1 - (np.nansum((data - pred_arr)**2, axis=0)/ np.nansum(((data - np.mean(data))**2), axis=0)))
+
+        return betas, dm, r2
+
+    
+    def calc_chisq(self, data, pred, error = None):
+
+        """
+        Calculate model fit  chi-square
+        
+        Parameters
+        ----------
+        data : arr
+            data array that was fitted
+        pred : arr
+            model prediction
+        error: arr
+            data uncertainty (if None will not be taken into account)
+        """ 
+    
+        # residuals
+        resid = data - pred 
+        
+        # if not providing uncertainty in ydata
+        if error is None:
+            error = np.ones(len(data))
+        
+        chisq = sum((resid/ error) ** 2)
+        
+        return chisq
+
+    def calc_reduced_chisq(self, data, pred, error = None, n_params = None):
+
+        """
+        Calculate model fit Reduced chi-square
+        
+        Parameters
+        ----------
+        data : arr
+            data array that was fitted
+        pred : arr
+            model prediction
+        error: arr
+            data uncertainty (if None will not be taken into account)
+        n_params: int
+            number of parameters in model
+        """ 
+        
+        return self.calc_chisq(data, pred, error = error) / (len(data) - n_params)
+
+    def calc_AIC(self, data, pred, error = None, n_params = None):
+
+        """
+        Calculate model fit Akaike Information Criterion,
+        which measures of the relative quality for a fit, 
+        trying to balance quality of fit with the number of variable parameters used in the fit
+        
+        Parameters
+        ----------
+        data : arr
+            data array that was fitted
+        pred : arr
+            model prediction
+        error: arr
+            data uncertainty (if None will not be taken into account)
+        n_params: int
+            number of parameters in model
+        """ 
+        
+        chisq = self.calc_chisq(data, pred, error = error)
+        n_obs = len(data) # number of data points
+        
+        return n_obs * np.log(chisq/n_obs) + 2 * n_params
 
 class GLM_Model(somaModel):
 

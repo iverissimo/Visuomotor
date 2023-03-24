@@ -50,6 +50,9 @@ class Viewer:
         plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['font.sans-serif'] = 'Helvetica'
 
+        # hemisphere labels
+        self.hemi_labels = ['LH', 'RH']
+
     def add_data2overlay(self, flatmap = None, name = ''):
 
         """
@@ -800,6 +803,56 @@ class Viewer:
         else:
             return roi_verts
 
+    def get_percent_vert_atlas(self, roi_verts = {}, atlas_rois_keys = ['4', '3a', '3b', '1']):
+
+        """
+        Given a user-defined ROI (or several), calculate the percentage of vertices 
+        that fall in a given atlas (Glasser) ROI  
+
+        Parameters
+        ----------
+        roi_verts: dict
+            dictionary with user-defined ROIs. 
+            must have info split in hemispheres (ex: roi_verts['LH']['handband_1'])
+        atlas_rois_keys: list/arr/dict
+            if list, then should have atlas roi names that we are looking into
+            if dictionary, then should have names of ROIs and list of glasser atlas labels 
+        """
+
+        # load atlas ROI df
+        self.get_atlas_roi_df(return_RGBA = False)
+
+        # check if list, turn to dict
+        if isinstance(atlas_rois_keys, list) or isinstance(atlas_rois_keys, np.ndarray):
+            atlas_rois_keys = {val: [val] for val in atlas_rois_keys}
+
+        # initialize empty DF
+        df_percent_glasser = pd.DataFrame({'glasser_roi': [], 'roi': [], 'hemisphere': [], 'percent_vert': []})
+
+        for glasser_roi in atlas_rois_keys.keys():
+            for hemi in self.hemi_labels:
+                
+                # get glasser vertices
+                atlas_vert = self.get_roi_vert_list(self.atlas_df, 
+                                                    roi_list = atlas_rois_keys[glasser_roi], 
+                                                    hemi = hemi)
+                
+                # calculate percentage of ROI vertices that are in glasser ROI
+                for rname in roi_verts[hemi].keys():
+                    
+                    perc_vert = sum(np.array([True for vert in roi_verts[hemi][rname] if vert in atlas_vert]))/len(roi_verts[hemi][rname])
+                    
+                    # append
+                    df_percent_glasser = pd.concat((df_percent_glasser,
+                                                pd.DataFrame({'glasser_roi': [glasser_roi], 
+                                                                'roi': [rname], #[int(re.findall('\d{1,2}', rname)[0])], #
+                                                                'hemisphere': [hemi], 
+                                                                'percent_vert': [perc_vert]})
+                                                ), ignore_index = True) 
+
+        return df_percent_glasser
+
+
     
 class somaViewer(Viewer):
 
@@ -830,8 +883,182 @@ class somaViewer(Viewer):
         else:
             self.outputdir = outputdir
 
-        # hemisphere labels
-        self.hemi_labels = ['LH', 'RH']
+
+    def plot_ratio_vert_in_altas(self, fig_abs_name = None, roi_verts = {}, 
+                                 atlas_rois_keys = ['4', '3a', '3b', '1']):
+
+        """
+        Plot ratio of user-defined ROI vertices that fall in Glasser rois
+        
+        Parameters
+        ----------
+        roi_verts: dict
+            dictionary with user-defined ROIs. 
+            must have info split in hemispheres (ex: roi_verts['LH']['handband_1'])
+        atlas_rois_keys: list/arr/dict
+            if list, then should have atlas roi names that we are looking into
+            if dictionary, then should have names of ROIs and list of glasser atlas labels 
+        fig_abs_name: str
+            absolute path where to store figure
+        """
+        ## get percentage of handband vertices that are in 
+        # different glasser atlas ROIs
+        df_percent_glasser = self.get_percent_vert_atlas(roi_verts = roi_verts, 
+                               atlas_rois_keys = atlas_rois_keys)
+
+        ## plot stacked barplot
+        fig, axs = plt.subplots(1, 2, figsize=(15,5), sharey=True, sharex=True)
+
+        for ind, hemi in enumerate(self.hemi_labels):
+            
+            # select df for hemisphere
+            hemi_df = df_percent_glasser[(df_percent_glasser['hemisphere'] == hemi)]
+
+            #create new 'sort' column that contains digits from 'product' column
+            hemi_df['sort'] = hemi_df['roi'].str.extract('(\d+)', expand=False).astype(int)
+            #sort rows based on digits in 'sort' column
+            hemi_df = hemi_df.sort_values('sort')
+            #drop 'sort' column
+            hemi_df = hemi_df.drop('sort', axis=1)
+
+            # pivot the dataframe into the wide form
+            dfp = hemi_df.pivot_table(index='roi', 
+                            columns='glasser_roi', 
+                            values='percent_vert', sort=False)
+
+            # plot stacked bar
+            dfp.plot(kind='bar', stacked=True, rot=0, ax=axs[ind], fontsize = 12)
+            
+            # fig formating
+            fig_title = 'Left Hemisphere' if hemi == 'LH' else 'Right Hemisphere'
+            axs[ind].set_title(fig_title, fontsize=20, pad=10)
+            axs[ind].set_ylim(0,1.01) 
+            axs[ind].set_ylabel('Vertices in Glasser ROI (%)', fontsize=15, labelpad=10)
+            axs[ind].set_xlabel('ROI', fontsize=15, labelpad=10)
+
+        # rotate labels
+        fig.autofmt_xdate(rotation=90)
+
+        # control aspect ratio
+        plt.subplots_adjust(wspace=0.1, hspace=0)
+
+        if fig_abs_name is not None:
+            # if output path doesn't exist, create it
+            os.makedirs(op.split(fig_abs_name)[0], exist_ok = True)
+            fig.savefig(fig_abs_name)
+        else:
+            plt.show()
+
+        return df_percent_glasser
+    
+    def plot_handband_COM_scatter(self, participant_list, r_thresh = .1, fit_type = 'loo_run', pysub = None):
+
+        """
+        Plot COM values in scatter plot, for all handband ROIs
+        Vertically oriented, and sorted from anterior to posterior
+        
+        Parameters
+        ----------
+        participant_list: list
+            list with participant ID 
+        r_thresh: float
+            if putting a rsquare threshold on the data being showed
+        """
+
+        # if pycortex subject not specified
+        if pysub is None:
+            pysub = self.pysub
+
+        # set figures path
+        figures_pth = op.join(self.outputdir, 'handband_COM', fit_type)
+
+        ## get vertex dictionary for hand band
+        LH_roi_verts, RH_roi_verts = self.get_ROI_verts_dict(pysub = pysub, 
+                                                            ROIs = "handband_\d{1,2}", split_hemi = True)
+        # save in dict for ease of use
+        roi_verts = {'LH': LH_roi_verts, 'RH': RH_roi_verts}
+
+        ## get surface x and y coordinates, for each hemisphere
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(pysub = pysub,
+                                                            merge = True)
+        
+        ## ROTATE COORDINATES IN MAIN AXIS
+        roi_coord = {'LH': {}, 'RH': {}}
+
+        for hemi in self.hemi_labels:
+            for rname in roi_verts[hemi].keys():
+
+                roi_coord[hemi][rname] = self.transform_roi_coords(np.vstack((x_coord_surf[roi_verts[hemi][rname]], 
+                                                                            y_coord_surf[roi_verts[hemi][rname]])), 
+                                                    fig_pth = op.join(self.somaModelObj.MRIObj.derivatives_pth, 
+                                                                    'plots', 'PCA_ROI'), 
+                                                    roi_name = '{rn}_{h}'.format(rn = rname, h = hemi), 
+                                                    theta = None)
+        
+        ## get handband COM dataframe for participant list
+        handband_COM_df = self.get_handband_COM_df(participant_list, 
+                                                      roi_coord = roi_coord, 
+                                                      roi_verts = roi_verts, 
+                                                      fit_type = fit_type, return_surf = False)
+        ## get sorted ROI names
+        # from 1 to 22 --> anterior to posterior
+        roi_names_all = np.array(sorted(handband_COM_df.ROI.unique(), 
+                                        key=lambda rn: int(re.findall('\d{1,2}',rn)[0])))
+
+        # for each participant, 
+        for pp in participant_list:
+            # and hemisphere, plot
+            for hemi in self.hemi_labels:
+
+                # depending on hemisphere, select relevant movement
+                movements = ['R_hand', 'B_hand'] if hemi == 'LH' else ['L_hand', 'B_hand']
+
+                # set figure
+                fig, axs = plt.subplots(2, len(roi_names_all), figsize=(22,8), sharey=True)
+
+                # iterate over rows of subplots
+                for row_ind, movement_region in enumerate(movements):
+                    
+                    # subselect relevant part of full DF
+                    df2plot = handband_COM_df[(handband_COM_df['sj'] == pp) & \
+                                            (handband_COM_df['r2'] > r_thresh) & \
+                                            (handband_COM_df['hemisphere'] == hemi) & \
+                                            (handband_COM_df['movement_region'] == movement_region)]
+
+                    # actually plot handband
+                    for ind, rname in enumerate(roi_names_all):
+
+                        im = axs[row_ind][ind].scatter(df2plot[df2plot['ROI'] == rname].x_coordinates,
+                                                    df2plot[df2plot['ROI'] == rname].y_coordinates,
+                                                    c = df2plot[df2plot['ROI'] == rname].COM,
+                                                    cmap = 'rainbow_r',
+                                                    vmin = 0, vmax = 4)
+                        axs[row_ind][ind].set_title(int(re.findall('\d{1,2}',rname)[0]), fontsize=20, pad=10)
+                        
+                        if ind == 0:
+                            if row_ind == 0:
+                                row_label = 'Right Hand' if hemi == 'LH' else 'Left Hand'
+                            else:
+                                row_label = 'Both Hands'
+                            
+                            axs[row_ind][ind].set_ylabel(row_label+'\n\ny coordinates (a.u.)', fontsize=20, labelpad=10)
+                            # change fontsize of yticks
+                            axs[row_ind][ind].tick_params(axis='y',labelsize=12)
+                            
+                        # remove the x ticks
+                        axs[row_ind][ind].set_xticks([])        
+
+                fig.subplots_adjust(hspace=0.5, right=.82)
+                cbar_ax = fig.add_axes([0.85, 0.15, 0.02, 0.7])
+                fig.colorbar(im, cax=cbar_ax)
+
+                fig_name = op.join(figures_pth, 'sub-{sj}'.format(sj = pp), 
+                                                'sub-{sj}_handband_scatter_hemi-{h}.png'.format(sj = pp, h=hemi)) 
+                
+                # if output path doesn't exist, create it
+                os.makedirs(op.split(fig_name)[0], exist_ok = True)
+                fig.savefig(fig_name)
+
     
     def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None,
                                             fit_type = 'mean_run', keep_b_evs = False, fixed_effects = True):
@@ -1406,7 +1633,7 @@ class somaViewer(Viewer):
         all_regions: list
             with movement region name 
         all_rois: dict
-            dictionary with names of ROIs and and list of glasser atlas labels  
+            dictionary with names of ROIs and list of glasser atlas labels  
         n_bins: int
             number of y coord bins to divide COM values into
         """
@@ -1773,6 +2000,97 @@ class somaViewer(Viewer):
                     fig.savefig(fig_name.replace('.png', '_scatter_hemisphere-{h}_{roi_name}.png'.format(roi_name = roi2plot, 
                                                                                                         h = hemi)), 
                                 dpi=100,bbox_inches = 'tight')
+
+    def get_handband_COM_df(self, participant_list, roi_coord = {}, roi_verts = {}, fit_type = 'loo_run', return_surf = False):
+
+        """
+        For handband, get COM values for each participant, hemisphere and ROI
+
+        Parameters
+        ----------
+        participant_list: list
+            list with participant ID 
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        roi_coord: DF/dict
+            x-y coordinates for each ROI and hemisphere
+        roi_verts: DF/dict
+            vertex number for each ROI and hemisphere
+        """
+
+        # initialize DF to save estimates
+        handband_COM_df = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'x_coordinates': [], 'y_coordinates': [],
+                                        'COM': [], 'r2': [], 'movement_region': []})
+
+        surf_COM_df = {'L_hand': {'sj': {}}, 'R_hand': {'sj': {}}, 'B_hand': {'sj': {}}} # to save whole surface values
+
+        side_list = ['L', 'R', 'B'] # we want to store COM values for left, right and both hands
+
+        ## load Hand COM
+        for pp in participant_list:
+
+            if fit_type == 'loo_run':
+                # get all run lists
+                run_loo_list = self.somaModelObj.get_run_list(self.somaModelObj.get_soma_file_list(pp, 
+                                                                file_ext = self.somaModelObj.MRIObj.params['fitting']['soma']['extension']))
+
+                ## get average CV-r2 (all used in GLM)
+                _, r2_pp = self.somaModelObj.average_betas(pp, fit_type = fit_type, 
+                                                            weighted_avg = True, runs2load = run_loo_list)
+
+                ## get com_filepath
+                com_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                    'sub-{sj}'.format(sj = pp), 'fixed_effects', fit_type)
+
+            else:
+                # load GLM estimates, and get r2
+                soma_estimates = np.load(op.join(self.somaModelObj.outputdir, 
+                                                'sub-{sj}'.format(sj = pp), 
+                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                                allow_pickle=True).item()
+                r2_pp = soma_estimates['r2']
+
+                ## get com_filepath
+                com_dir = op.join(self.somaModelObj.MRIObj.derivatives_pth, 'glm_COM', 
+                                                'sub-{sj}'.format(sj = pp), fit_type)
+                
+            ## load COM
+            for side in side_list:
+                
+                COM_region = np.load(op.join(com_dir, 'COM_reg-upper_limb_{s}.npy'.format(s=side)), 
+                                allow_pickle = True)
+                surf_COM_df['{s}_hand'.format(s=side)]['sj'][pp] = COM_region
+                
+                # select values per hemisphere
+                for hemi in ['LH', 'RH']:
+                    # and ROI
+                    for rname in roi_coord[hemi].keys():
+                        
+                        # select COM values for hemi and ROI
+                        com_roi_hemi = COM_region[roi_verts[hemi][rname]]
+                        
+                        # mask out regions that are nan
+                        mask_bool = (~np.isnan(com_roi_hemi)).astype(bool)
+                
+                        # save values in df
+                        handband_COM_df = pd.concat((handband_COM_df,
+                                                    pd.DataFrame({'sj': np.tile(pp, len(com_roi_hemi[mask_bool])), 
+                                                                'ROI': np.tile(rname, len(com_roi_hemi[mask_bool])), 
+                                                                'hemisphere': np.tile(hemi, len(com_roi_hemi[mask_bool])), 
+                                                                'x_coordinates': roi_coord[hemi][rname][0][mask_bool], 
+                                                                'y_coordinates': roi_coord[hemi][rname][1][mask_bool],
+                                                                'COM': com_roi_hemi[mask_bool], 
+                                                                'r2': r2_pp[roi_verts[hemi][rname]][mask_bool], 
+                                                                'movement_region': np.tile('{s}_hand'.format(s=side), 
+                                                                                            len(com_roi_hemi[mask_bool]))
+                                                                })
+                                                    ), ignore_index = True)
+        
+        # if we also want whole surface values
+        if return_surf:
+            return handband_COM_df, surf_COM_df
+        else:
+            return handband_COM_df
 
 
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,

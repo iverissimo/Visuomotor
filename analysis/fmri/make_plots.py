@@ -151,6 +151,11 @@ elif task == 'soma':
 
         plotter.plot_rsq(Visuomotor_data.sj_num, fit_type = run_type,
                             all_rois = Visuomotor_data.params['plotting']['soma']['roi2plot'])
+        
+    elif py_cmd == 'handband_COM':
+
+        plotter.plot_handband_COM_scatter(Visuomotor_data.sj_num, fit_type = run_type, 
+                                          r_thresh = .1, pysub = 'fsaverage4drawing')
 
     elif py_cmd == 'beta_y_dist':
 
