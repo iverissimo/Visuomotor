@@ -647,6 +647,31 @@ class somaModel:
         n_obs = len(data) # number of data points
         
         return n_obs * np.log(chisq/n_obs) + 2 * n_params
+    
+    def calc_BIC(self, data, pred, error = None, n_params = None):
+
+        """
+        Calculate model fit Bayesian information criterion,
+        which measures of the relative quality for a fit, 
+        trying to balance quality of fit with the number of variable parameters used in the fit
+        
+        Parameters
+        ----------
+        data : arr
+            data array that was fitted
+        pred : arr
+            model prediction
+        error: arr
+            data uncertainty (if None will not be taken into account)
+        n_params: int
+            number of parameters in model
+        """ 
+        
+        chisq = self.calc_chisq(data, pred, error = error)
+        n_obs = len(data) # number of data points
+        
+        return n_obs * np.log(chisq/n_obs) + np.log(n_obs) * n_params
+    
 
 class GLM_Model(somaModel):
 

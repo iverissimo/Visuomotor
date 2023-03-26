@@ -1059,7 +1059,7 @@ class somaViewer(Viewer):
 
     def makefig_handband_COM_over_y(self, handband_COM_df, 
                                     participant_list = [], hemi = 'LH', movement_region = 'R_hand', roi_ind_list = [8,9,10,11],
-                                    r_thresh = .1):
+                                    r_thresh = .1, df_models = None, model_names = ['linear', 'piecewise'], model_colors = ['grey', 'k']):
         
         """
         Make figure of COM values vs y coordinates
@@ -1080,6 +1080,8 @@ class somaViewer(Viewer):
             movement of right/left or both hands
         roi_ind_list: list
             list of handband indices to plot
+        df_models: DF
+            if provided, will also plot model fit on top (ex: linear fit, or piecewise)
         """
 
         # make custom colormap
@@ -1118,7 +1120,37 @@ class somaViewer(Viewer):
                     
                     axs[ind][col_ind].set_xlabel('y coordinates (a.u.)', fontsize = 18, labelpad=10)
                     axs[ind][col_ind].tick_params(axis='x',labelsize=12)
-                
+
+                # if model fit dataframe provided, plot prediction on top of scatter 
+                if df_models is not None:
+                    
+                    # get model values for pp
+                    pp_models_df = df_models[(df_models['ROI'] == rname) & \
+                                            (df_models['hemisphere'] == hemi) & \
+                                            (df_models['sj'] == pp) & \
+                                            (df_models['movement_region'] == movement_region)]
+                    
+                    new_x = np.linspace(df2plot.y_coordinates.values.min(), df2plot.y_coordinates.values.max(), len(df2plot.y_coordinates))
+
+                    # plot lines for each model
+                    for ind_mod, model in enumerate(model_names):
+                        # get coeffs and R2
+                        coeff = pp_models_df[pp_models_df['model'] == model].coeffs.values[0]
+                        r2_model = pp_models_df[pp_models_df['model'] == model].R2.values[0]
+
+                        # get prediction array
+                        if model == 'piecewise':
+                            model_prediction = self.somaModelObj.piecewise_linear(new_x, *coeff)
+                        elif model == 'linear':
+                            model_prediction = self.somaModelObj.linear_func(dm = np.vstack((new_x, 
+                                                                                    np.ones(new_x.shape))).T, 
+                                                                            betas = coeff)
+                             
+                        # actually plot
+                        axs[ind][col_ind].plot(new_x, model_prediction, color = model_colors[ind_mod])
+                        axs[ind][col_ind].annotate("R2 {mod} - {r_val:.2f}".format(r_val = r2_model, mod = model), 
+                                                   xy=(0, .7 - ind_mod/3), xycoords='data')
+
             # format y ticks and label
             axs[ind][0].set_ylabel('sub-{sj}\n\nCOM'.format(sj = pp), fontsize = 18, labelpad=10)
             axs[ind][0].tick_params(axis='y',labelsize=12)
@@ -1132,6 +1164,119 @@ class somaViewer(Viewer):
         fig.subplots_adjust(hspace=0.1,wspace=0.1, right=.82)
 
         return fig
+
+    def get_handband_COM_model_fit_df(self, handband_COM_df, 
+                                    participant_list = [], hemi = 'LH', movement_region = 'R_hand', roi_ind_list = [8,9,10,11],
+                                    r_thresh = .1):
+        
+        """
+        Fit linear vs piecewise model
+        for select handband-ROIs, hemisphere and hand movement
+        across participants
+
+        Parameters
+        ----------
+        handband_COM_df: DataFrame
+            dataframe with COM values for all handband rois
+        participant_list: list
+            list with participant ID 
+        r_thresh: float
+            if putting a rsquare threshold on the data being showed
+        hemi: str
+            hemisphere to focus on
+        movement_region: str
+            movement of right/left or both hands
+        roi_ind_list: list
+            list of handband indices to plot
+        """
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+
+        ## save relevant values
+        df_summary_models = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'movement_region': [],
+                                        'model': [], 'AIC': [], 'BIC': [], 'R2': [], 'coeffs': []})
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+            
+        # loop over participants
+        for ind, pp in enumerate(participant_list):
+
+            # plot all columns in row (with values for the participant and handband rois in list)
+            for col_ind, rname in enumerate(roi_names_list):
+
+                # subselect relevant part of DF
+                df2plot = handband_COM_df[(handband_COM_df['ROI'] == rname) & \
+                                        (handband_COM_df['hemisphere'] == hemi) & \
+                                        (handband_COM_df['sj'] == pp) & \
+                                        (handband_COM_df['r2'] > r_thresh) & \
+                                        (handband_COM_df['movement_region'] == movement_region)]
+                
+                ## fit piecewise function to data
+                coeff_piecewise, _, r2_piecewise = self.somaModelObj.fit_piecewise(x_data = df2plot.y_coordinates.values, 
+                                                                    y_data = df2plot.COM.values, 
+                                                                    x0 = df2plot.y_coordinates.values[np.argmax(df2plot.COM.values)], 
+                                                                    y0 = np.max(df2plot.COM.values), 
+                                                                    k1 = 1, k2 = -1,
+                                                                    bounds=([-np.inf, -np.inf, 0, -np.inf], 
+                                                                            [np.inf, np.inf, np.inf, 0]))
+                
+                # calc AIC and BIC
+                aic_piecewise = self.somaModelObj.calc_AIC(df2plot.COM.values, 
+                                            self.somaModelObj.piecewise_linear(df2plot.y_coordinates.values, 
+                                                                                    *coeff_piecewise), 
+                                            n_params = len(coeff_piecewise))
+                
+                bic_piecewise = self.somaModelObj.calc_BIC(df2plot.COM.values, 
+                                            self.somaModelObj.piecewise_linear(df2plot.y_coordinates.values, 
+                                                                                    *coeff_piecewise), 
+                                            n_params = len(coeff_piecewise))
+                
+                
+                ## store in dataframe
+                df_summary_models = pd.concat((df_summary_models,
+                                        pd.DataFrame({'sj': [pp], 
+                                                        'ROI': [rname], 
+                                                        'hemisphere': [hemi], 
+                                                        'movement_region': [movement_region],
+                                                        'model': ['piecewise'], 
+                                                        'AIC': [aic_piecewise], 
+                                                        'BIC': [bic_piecewise], 
+                                                        'R2': [r2_piecewise], 
+                                                        'coeffs': [coeff_piecewise]})), 
+                                            ignore_index = True)
+
+                ## fit simple linear regression
+                coeff_linear, dm_linear, r2_linear = self.somaModelObj.fit_linear(df2plot.COM.values, 
+                                                                                    df2plot.y_coordinates.values, 
+                                                                                    add_intercept = True)
+                
+                # calc AIC and BIC
+                aic_linear = self.somaModelObj.calc_AIC(df2plot.COM.values, 
+                                                    self.somaModelObj.linear_func(dm = dm_linear, 
+                                                                                    betas = coeff_linear), 
+                                                    n_params = len(coeff_linear))
+                
+                bic_linear = self.somaModelObj.calc_BIC(df2plot.COM.values, 
+                                                    self.somaModelObj.linear_func(dm = dm_linear, 
+                                                                                    betas = coeff_linear), 
+                                                    n_params = len(coeff_linear))
+                
+                ## store in dataframe
+                df_summary_models = pd.concat((df_summary_models,
+                                        pd.DataFrame({'sj': [pp], 
+                                                        'ROI': [rname], 
+                                                        'hemisphere': [hemi], 
+                                                        'movement_region': [movement_region],
+                                                        'model': ['linear'], 
+                                                        'AIC': [aic_linear], 
+                                                        'BIC': [bic_linear], 
+                                                        'R2': [r2_linear], 
+                                                        'coeffs': [coeff_linear]})), 
+                                            ignore_index = True)
+                
+        return df_summary_models
 
 
     def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None,
@@ -2165,7 +2310,6 @@ class somaViewer(Viewer):
             return handband_COM_df, surf_COM_df
         else:
             return handband_COM_df
-
 
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
                                     n_bins = 256, custom_dm = True, keep_b_evs = False,
