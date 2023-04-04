@@ -19,7 +19,9 @@ from nilearn import surface
 import nibabel as nib
 import cortex
 
-class prfModel:
+from model import Model
+
+class prfModel(Model):
 
     def __init__(self, MRIObj, outputdir = None):
 
@@ -35,15 +37,12 @@ class prfModel:
             
         """
 
-        ## set data object to use later on
-        # has relevant paths etc
-        self.MRIObj = MRIObj
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
 
         # if output dir not defined, then make it in derivatives
         if outputdir is None:
             self.outputdir = op.join(self.MRIObj.derivatives_pth, 'pRF_fit')
-        else:
-            self.outputdir = outputdir
 
         ### some relevant params ###
 
@@ -68,78 +67,15 @@ class prfModel:
         # processed file extension
         self.proc_file_ext = self.MRIObj.params['fitting']['prf']['extension']
 
+        # path to postfmriprep files
+        self.proc_file_pth = op.join(self.MRIObj.postfmriprep_pth, self.MRIObj.sj_space, 'prf')
+
         # total number of chunks we divide data when fitting
         self.total_chunks = self.MRIObj.params['fitting']['prf']['total_chunks']
 
         # bar width ratio
         self.bar_width_ratio = self.MRIObj.params['prf']['bar_width_ratio']
         self.hrf_onset = self.MRIObj.params['fitting']['prf']['hrf_onset']
-
-
-    def get_prf_file_list(self, participant, file_ext = 'cropped_dc_psc.func.gii'):
-
-        """
-        Helper function to get list of bold file names
-        to then be loaded and used
-
-        Parameters
-        ----------
-        participant: str
-            participant ID
-        """
-
-        ## get list of possible input paths
-        # (sessions)
-        input_list = op.join(self.MRIObj.postfmriprep_pth, self.MRIObj.sj_space, 'prf', 'sub-{sj}'.format(sj = participant))
-
-        # list with absolute file names to be fitted
-        bold_filelist = [op.join(input_list, file) for file in os.listdir(input_list) if file.endswith(file_ext)]
-
-        return bold_filelist
-
-    def get_run_list(self, file_list):
-
-        """
-        Helper function to get unique run number from list of strings (filenames)
-
-        Parameters
-        ----------
-        file_list: list
-            list with file names
-        """
-        return np.unique([int(re.findall(r'run-\d{1,3}', op.split(input_name)[-1])[0][4:]) for input_name in file_list])
-   
-
-    def load_data4fitting(self, file_list):
-
-        """
-        Helper function to load data for fitting
-
-        Parameters
-        ----------
-        file_list: list
-            list with file names
-        """
-
-        # get run IDs
-        run_num_list = self.get_run_list(file_list)
-
-        ## load data of all runs
-        # will be [runs, vertex, TR]
-
-        all_data = []
-        for run_id in run_num_list:
-            
-            run_data = []
-            for hemi in self.MRIObj.hemispheres:
-                
-                hemi_file = [file for file in file_list if 'run-{r}'.format(r=str(run_id).zfill(2)) in file and hemi in file][0]
-                print('loading %s' %hemi_file)    
-                run_data.append(np.array(surface.load_surf_data(hemi_file)))
-                
-            all_data.append(np.vstack(run_data)) # will be (vertex, TR)
-
-        return all_data
 
 
     def make_dm(self, participant, run_length_TR = 90, crop_nr = None, shift = 0, 
@@ -593,15 +529,11 @@ class prfModel:
 
         ## LOAD RUN DATA
         # get list with gii files
-        gii_filenames = self.get_prf_file_list(participant, 
-                                            file_ext = self.MRIObj.params['fitting']['prf']['extension'])
+        gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
 
         if fit_type == 'mean_run':         
-            # load data of all runs
-            all_data = self.load_data4fitting(gii_filenames) # [runs, vertex, TR]
-
-            # average runs
-            data2fit = np.nanmean(all_data, axis = 0)[np.newaxis,...]
+            # load data of all runs and average
+            data2fit = self.load_data4fitting(gii_filenames, average = True)[np.newaxis,...] # [1, vertex, TR]
 
         elif fit_type == 'loo_run':
             # get all run lists
@@ -612,9 +544,9 @@ class prfModel:
 
             for lo_run_key in run_loo_list:
                 print('Leaving run-{r} out'.format(r = str(lo_run_key).zfill(2)))
-
-                all_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file])
-                data2fit.append(np.nanmean(all_data, axis = 0)[np.newaxis,...])
+                files2fit = [file for file in gii_filenames if 'run-{r}'.format(r = str(lo_run_key).zfill(2)) not in file]
+                
+                data2fit.append(self.load_data4fitting(files2fit, average = True)[np.newaxis,...]) # [1, vertex, TR]
 
             data2fit = np.vstack(data2fit)
 

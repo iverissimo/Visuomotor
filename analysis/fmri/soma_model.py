@@ -13,10 +13,12 @@ from nilearn.plotting import plot_design_matrix
 from nilearn.glm.first_level.hemodynamic_models import spm_hrf, spm_time_derivative, spm_dispersion_derivative
 
 from statsmodels.stats.multitest import fdrcorrection
+from scipy import ndimage
 
 import datetime
 
-from visuomotor_utils import leave_one_out, COM
+
+from model import Model
 
 import scipy
 
@@ -27,7 +29,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 
-class somaModel:
+class somaModel(Model):
 
     def __init__(self, MRIObj, outputdir = None):
 
@@ -43,15 +45,14 @@ class somaModel:
             
         """
 
-        ## set data object to use later on
-        # has relevant paths etc
-        self.MRIObj = MRIObj
-
-        # if output dir not defined, then make it in derivatives
-        self.outputdir = outputdir
+        # need to initialize parent class (Model), indicating output infos
+        super().__init__(MRIObj = MRIObj, outputdir = outputdir)
 
         # processed file extension
         self.proc_file_ext = self.MRIObj.params['fitting']['soma']['extension']
+
+        # path to postfmriprep files
+        self.proc_file_pth = op.join(self.MRIObj.postfmriprep_pth, self.MRIObj.sj_space, 'soma')
 
         # get trial condition labels, in order 
         self.soma_stim_labels = [op.splitext(val)[0] for val in self.MRIObj.params['fitting']['soma']['soma_stimulus']]
@@ -59,76 +60,6 @@ class somaModel:
         # get unique labels of conditions
         _, idx = np.unique(self.soma_stim_labels, return_index=True) 
         self.soma_cond_unique = np.array(self.soma_stim_labels)[np.sort(idx)]
-
-    def get_soma_file_list(self, participant, file_ext = 'sg_psc.func.gii'):
-
-        """
-        Helper function to get list of bold file names
-        to then be loaded and used
-
-        Parameters
-        ----------
-        participant: str
-            participant ID
-        file_ext: str
-            bold file extension identifier 
-        """
-
-        ## get list of possible input paths
-        # (sessions)
-        input_list = op.join(self.MRIObj.postfmriprep_pth, self.MRIObj.sj_space, 'soma', 'sub-{sj}'.format(sj = participant))
-
-        # list with absolute file names to be fitted
-        bold_filelist = [op.join(input_list, file) for file in os.listdir(input_list) if file.endswith(file_ext)]
-
-        return bold_filelist
-
-    def get_run_list(self, file_list):
-
-        """
-        Helper function to get unique run number from list of strings (filenames)
-
-        Parameters
-        ----------
-        file_list: list
-            list with file names
-        """
-        return np.unique([int(re.findall(r'run-\d{1,3}', op.split(input_name)[-1])[0][4:]) for input_name in file_list])
-    
-    def load_data4fitting(self, file_list, average = False):
-
-        """
-        Helper function to load data for fitting
-
-        Parameters
-        ----------
-        file_list: list
-            list with file names
-        average: bool
-            if we return average across files or all runs stacked
-        """
-
-        # get run IDs
-        run_num_list = self.get_run_list(file_list)
-
-        ## load data of all runs
-        all_data = []
-        for run_id in run_num_list:
-            
-            run_data = []
-            for hemi in self.MRIObj.hemispheres:
-                
-                hemi_file = [file for file in file_list if 'run-{r}'.format(r=str(run_id).zfill(2)) in file and hemi in file][0]
-                print('loading %s' %hemi_file)    
-                run_data.append(np.array(surface.load_surf_data(hemi_file)))
-                
-            all_data.append(np.vstack(run_data)) 
-
-        # if we want to average 
-        if average:
-            return np.nanmean(all_data, axis = 0) # [vertex, TR]
-        else:
-            return all_data # [runs, vertex, TR]
 
     def set_contrast(self, dm_col, tasks, contrast_val = [1], num_cond = 1):
     
@@ -430,248 +361,30 @@ class somaModel:
         
         return out_arr
 
-    def get_Fstat(self, data, rmodel_pred = None, fmodel_pred = None, num_regs = None):
-
-        """
-        Calculate goodness of fit F stat for full vs simple model
-        
-        Parameters
-        ----------
-        data : arr
-            data
-        rmodel_pred: arr
-            reduced model prediction (model with intercept only)
-        fmodel_pred: arr
-            full model prediction (all regressors + intercept) 
-        num_regs: int
-            number of regressors of full model       
-        """
-
-        # calculate sum of squared residuals
-        rss_1 = np.nansum((data - rmodel_pred) ** 2, axis = -1) # simple model
-        rss_2 = np.nansum((data - fmodel_pred) ** 2, axis = -1) # complex model
-
-        # F-statistic
-        # model 1 is nested in model 2, so F will always be positive
-        F_stat = ((rss_1 - rss_2)/(num_regs - 1))/(rss_2/(data.shape[-1] - num_regs))
-
-        # get corresponing p values
-        p_values_F = 1 - scipy.stats.f.cdf(F_stat, dfn = num_regs - 1, dfd = data.shape[-1] - num_regs)
-
-        return F_stat, p_values_F
-
-    def fdr_correct(self, alpha_fdr = 0.01, p_values = None, stat_values = None):
-
-        """
-        Calculate False Discovery Rate for a given statistic and p-values
-        returns corrected statistic (masking non-significant values with nan)
-
-        Parameters
-        ----------
-        alpha_fdr : float
-            alpha level [default 0.01 (1%)] 
-        p_values: arr
-            p-values
-        stat_values: arr
-            statistic value to be corrected      
-        """
-
-        # The fdrcorrection function already returns a "mask"
-        fdr_mask = fdrcorrection(p_values, alpha=alpha_fdr)[0]
-        fdr_mask = fdr_mask.reshape(p_values.shape)
-
-        fdr_stat_vals = stat_values.copy() 
-        fdr_stat_vals[~fdr_mask] = np.nan
-
-        return fdr_stat_vals
-
-    def piecewise_linear(self, x, x0, y0, k1, k2):
-
-        """
-        Calculate piecewise-defined function. 
-        Restricted to two linear segments, that intersect at x0
-        
-        Parameters
-        ----------
-        x : arr
-            input array of x-axis coordinates
-        x0 : float
-            x-position where segments intersect
-        y0 : float
-            y-position where segments intersect
-        k1 : float
-            slope for first segment
-        k2 : float
-            slope for second segment
-        """ 
-        
-        y = np.piecewise(x, [x < x0],# x >= x0],
-                        [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
-        
-        return y
+    def COM(self, data):
     
-    def fit_piecewise(self, x_data = None, y_data = None, 
-                            x0 = .1, y0 = 4, k1 = 2, k2 = -2, 
-                            bounds = (-np.inf, np.inf), sigma = None, abs_sigma = False):
+        """ given an array of values x vertices, 
+        compute center of mass 
 
-        """
-        Fit piecewise-defined function on data.
-        [Restricted to two linear segments, that intersect at x0]
-        
         Parameters
         ----------
-        x_data : arr
-            x input values to fit
-        y_data : arr
-            y input values to fit
-        bounds: tuple
-            Lower and upper bounds on parameters - see scipy optimize bounds for more info
-        x0 : float
-            initial guess - x-position where segments intersect
-        y0 : float
-            initial guess - y-position where segments intersect
-        k1 : float
-            initial guess - slope for first segment
-        k2 : float
-            initial guess - slope for second segment
-        sigma: arr
-            1D array of uncertainty in ydata, should contain values of standard deviations of errors in ydata
-        """ 
+        data : List/arr
+            array with values to COM  (elements,vertices)
 
-        popt_piecewise, pcov = scipy.optimize.curve_fit(self.piecewise_linear, 
-                                                x_data, y_data, 
-                                                p0 = [x0, y0, k1, k2],
-                                               bounds = bounds,
-                                               sigma = sigma, absolute_sigma = abs_sigma)
-        
-        # get R2 of fit
-        pred_arr = self.piecewise_linear(x_data, *popt_piecewise)
-        r2 = np.nan_to_num(1 - (np.nansum((y_data - pred_arr)**2, axis=0)/ np.nansum(((y_data - np.mean(y_data))**2), axis=0)))
-        
-        return popt_piecewise, pcov, r2
-    
-    def linear_func(self, dm = None, betas = None):
-        return dm.dot(betas)
-
-    def fit_linear(self, data, dm, add_intercept = True):
-
-        """
-        helper func to fit linear function on data.
+        Outputs
+        -------
+        center_mass : arr
+            array with COM for each vertex
         """
         
-        # check DM shape
-        if len(dm.shape) == 1: 
-            dm = dm.reshape(-1,1)
-        elif dm.shape[-1] > dm.shape[0]: # we want [npoints, betas]
-            dm = dm.T
+        # first normalize data, to fix issue of negative values
+        norm_data = np.array([self.normalize(data[...,x]) for x in range(data.shape[-1])])
+        norm_data = norm_data.T
+        
+        #then calculate COM for each vertex
+        center_mass = np.array([ndimage.measurements.center_of_mass(norm_data[...,x]) for x in range(norm_data.shape[-1])])
 
-        # stack intercept
-        if add_intercept: 
-            dm = np.hstack((dm, np.ones(dm.shape)))
-
-        # actually fit
-        betas = np.linalg.lstsq(dm, data, rcond = -1)[0]
-        
-        # get R2 of fit
-        pred_arr = self.linear_func(dm = dm, betas = betas)
-        r2 = np.nan_to_num(1 - (np.nansum((data - pred_arr)**2, axis=0)/ np.nansum(((data - np.mean(data))**2), axis=0)))
-
-        return betas, dm, r2
-
-    
-    def calc_chisq(self, data, pred, error = None):
-
-        """
-        Calculate model fit  chi-square
-        
-        Parameters
-        ----------
-        data : arr
-            data array that was fitted
-        pred : arr
-            model prediction
-        error: arr
-            data uncertainty (if None will not be taken into account)
-        """ 
-    
-        # residuals
-        resid = data - pred 
-        
-        # if not providing uncertainty in ydata
-        if error is None:
-            error = np.ones(len(data))
-        
-        chisq = sum((resid/ error) ** 2)
-        
-        return chisq
-
-    def calc_reduced_chisq(self, data, pred, error = None, n_params = None):
-
-        """
-        Calculate model fit Reduced chi-square
-        
-        Parameters
-        ----------
-        data : arr
-            data array that was fitted
-        pred : arr
-            model prediction
-        error: arr
-            data uncertainty (if None will not be taken into account)
-        n_params: int
-            number of parameters in model
-        """ 
-        
-        return self.calc_chisq(data, pred, error = error) / (len(data) - n_params)
-
-    def calc_AIC(self, data, pred, error = None, n_params = None):
-
-        """
-        Calculate model fit Akaike Information Criterion,
-        which measures of the relative quality for a fit, 
-        trying to balance quality of fit with the number of variable parameters used in the fit
-        
-        Parameters
-        ----------
-        data : arr
-            data array that was fitted
-        pred : arr
-            model prediction
-        error: arr
-            data uncertainty (if None will not be taken into account)
-        n_params: int
-            number of parameters in model
-        """ 
-        
-        chisq = self.calc_chisq(data, pred, error = error)
-        n_obs = len(data) # number of data points
-        
-        return n_obs * np.log(chisq/n_obs) + 2 * n_params
-    
-    def calc_BIC(self, data, pred, error = None, n_params = None):
-
-        """
-        Calculate model fit Bayesian information criterion,
-        which measures of the relative quality for a fit, 
-        trying to balance quality of fit with the number of variable parameters used in the fit
-        
-        Parameters
-        ----------
-        data : arr
-            data array that was fitted
-        pred : arr
-            model prediction
-        error: arr
-            data uncertainty (if None will not be taken into account)
-        n_params: int
-            number of parameters in model
-        """ 
-        
-        chisq = self.calc_chisq(data, pred, error = error)
-        n_obs = len(data) # number of data points
-        
-        return n_obs * np.log(chisq/n_obs) + np.log(n_obs) * n_params
-    
+        return center_mass.T[0]
 
 class GLM_Model(somaModel):
 
@@ -694,8 +407,10 @@ class GLM_Model(somaModel):
         # if output dir not defined, then make it in derivatives
         if outputdir is None:
             self.outputdir = op.join(self.MRIObj.derivatives_pth, 'glm_fits')
-        else:
-            self.outputdir = outputdir
+
+        # set path for stats and COM
+        self.stats_outputdir = op.join(op.split(self.outputdir)[0], 'glm_stats')
+        self.COM_outputdir = op.join(op.split(self.outputdir)[0], 'glm_COM')
 
     def load_design_matrix(self, participant, keep_b_evs = True, custom_dm = True, osf = 100, nTRs = 141, hrf_model = 'glover'):
 
@@ -735,8 +450,7 @@ class GLM_Model(somaModel):
                                                         ) 
         return design_matrix
 
-    def make_custom_dm(self, events_df, osf = 100, data_len_TR = 141, 
-                            hrf_params = [1,1,0], hrf_onset = 0):
+    def make_custom_dm(self, events_df, osf = 100, data_len_TR = 141, hrf_params = [1,1,0], hrf_onset = 0):
 
         """
         Helper function to make custom dm, 
@@ -852,7 +566,37 @@ class GLM_Model(somaModel):
                 region_regs[reg] = self.MRIObj.params['fitting']['soma']['all_contrasts'][reg]
             
         return region_regs
+    
+    def load_GLMestimates(self, participant, fit_type = 'mean_run', run_id = None):
 
+        """ 
+        Load GLM estimates dictionary,
+        for folder where it was fit
+        
+        Parameters
+        ----------
+        participant: str
+            participant ID  
+        fit_type: str
+            type of run to fit (mean of all runs, or leave one out)  
+        run_id: str
+            id of run, for case of loo-run
+        """
+
+        if fit_type == 'loo_run':
+                ## load estimates, and get betas and prediction
+                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, 
+                                                'estimates_loo_run-{ri}.npy'.format(ri = str(run_id).zfill(2))), 
+                                                allow_pickle=True).item()
+
+        elif fit_type == 'mean_run':     
+            ## load estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
+                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
+                                            allow_pickle=True).item()
+            
+        return soma_estimates
+        
     def contrast_regions(self, participant, hrf_model = 'glover', custom_dm = True, fit_type = 'mean_run',
                                             z_threshold = 3.1, pval_1sided = True, keep_b_evs = False,
                                             reg_keys = ['face', 'upper_limb', 'lower_limb']):
@@ -881,19 +625,18 @@ class GLM_Model(somaModel):
         """
 
         ## make new out dir, depeding on our HRF approach
-        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                        'sub-{sj}'.format(sj = participant), fit_type)
+        out_dir = op.join(self.stats_outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
         ## Load data
         # get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+        gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
 
         if fit_type == 'mean_run':         
             # load data of all runs and average
             data2fit = self.load_data4fitting(gii_filenames, average = True)[np.newaxis,...] # [1, vertex, TR]
+            run_id = None
 
         elif fit_type == 'loo_run':
             # get all run lists
@@ -915,23 +658,16 @@ class GLM_Model(somaModel):
         ## get stats for all runs
         for rind, avg_data in enumerate(data2fit): # [vertex, TR]
 
-            # if we want stats from leave one out, then we'll do a fixed effects statistic
             if fit_type == 'loo_run':
-                ## load estimates, and get betas and prediction
-                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                                fit_type, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2))), 
-                                                allow_pickle=True).item()
-
                 # update outdir for current run we are running
                 out_dir = op.join(out_dir, 'loo_run-{ri}'.format(ri = str(run_loo_list[rind]).zfill(2)))
                 os.makedirs(out_dir, exist_ok = True)
 
-            elif fit_type == 'mean_run':
+                run_id = run_loo_list[rind]
 
-                ## load estimates, and get betas and prediction
-                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                                fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                                allow_pickle=True).item()
+            ## load estimates, and get betas and prediction
+            soma_estimates = self.load_GLMestimates(participant, fit_type = fit_type, run_id = run_id)
+
             betas = soma_estimates['betas']
             prediction = soma_estimates['prediction']
 
@@ -942,7 +678,7 @@ class GLM_Model(somaModel):
             # get region keys
             region_regs = self.get_region_keys(reg_keys = reg_keys, keep_b_evs = keep_b_evs)
             # loo for keys 
-            loo_keys = leave_one_out(reg_keys) 
+            loo_keys = self.leave_one_out(reg_keys) 
 
             # one broader region vs all the others
             for index,region in enumerate(reg_keys): 
@@ -1051,14 +787,12 @@ class GLM_Model(somaModel):
         """
 
         ## make new out dir, depeding on our HRF approach
-        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                        'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+        out_dir = op.join(self.stats_outputdir, 'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
         # get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+        gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
 
         if fit_type == 'loo_run':
             # get all run lists
@@ -1089,13 +823,8 @@ class GLM_Model(somaModel):
 
         for rind, avg_data in enumerate(data2fit): # [vertex, TR]
 
-            # if we want stats from leave one out, then we'll do a fixed effects statistic
-            if fit_type == 'loo_run':
-
-                ## load estimates, and get betas and prediction
-                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                                fit_type, 'estimates_loo_run-{ri}.npy'.format(ri = str(run_loo_list[rind]).zfill(2))), 
-                                                allow_pickle=True).item()
+            ## load estimates, and get betas and prediction
+            soma_estimates = self.load_GLMestimates(participant, fit_type = fit_type, run_id = run_loo_list[rind])
 
             betas = soma_estimates['betas']
             prediction = soma_estimates['prediction']
@@ -1106,7 +835,7 @@ class GLM_Model(somaModel):
             # get region keys
             region_regs = self.get_region_keys(reg_keys = reg_keys, keep_b_evs = keep_b_evs)
             # loo for keys 
-            loo_keys = leave_one_out(reg_keys) 
+            loo_keys = self.leave_one_out(reg_keys) 
         
             # one broader region vs all the others
             for index,region in enumerate(reg_keys): 
@@ -1235,12 +964,9 @@ class GLM_Model(somaModel):
 
         # loop over runs
         for run_key in runs2load: 
-            
+
             ## load estimates, and get betas and prediction
-            soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                            fit_type, 'estimates_{ft}-{ri}.npy'.format(ft = fit_type,
-                                                                                    ri = str(run_key).zfill(2))), 
-                                            allow_pickle=True).item()
+            soma_estimates = self.load_GLMestimates(participant, fit_type = fit_type, run_id = str(run_key).zfill(2))
 
             # append beta values
             all_betas.append(soma_estimates['betas'][np.newaxis,...])
@@ -1304,8 +1030,7 @@ class GLM_Model(somaModel):
 
         ## Load data
         # get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+        gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
 
         if fit_type == 'mean_run':         
             # load data of all runs and average
@@ -1402,18 +1127,15 @@ class GLM_Model(somaModel):
         # if we want to used loo betas, and fixed effects t-stat
         if (fit_type == 'loo_run') and (fixed_effects == True): 
             ## make new out dir, depeding on our HRF approach
-            out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
-                                            'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+            out_dir = op.join(self.COM_outputdir, 'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
             # if output path doesn't exist, create it
             os.makedirs(out_dir, exist_ok = True)
 
             # path where Region contrasts were stored
-            stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                                    'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+            stats_dir = op.join(self.stats_outputdir, 'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
 
             # get list with gii files
-            gii_filenames = self.get_soma_file_list(participant, 
-                                                file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+            gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
             # get all run lists
             run_loo_list = self.get_run_list(gii_filenames)
 
@@ -1423,14 +1145,12 @@ class GLM_Model(somaModel):
 
         else:
             ## make new out dir, depeding on our HRF approach
-            out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_COM', 
-                                            'sub-{sj}'.format(sj = participant), fit_type)
+            out_dir = op.join(self.COM_outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
             # if output path doesn't exist, create it
             os.makedirs(out_dir, exist_ok = True)
 
             # path where Region contrasts were stored
-            stats_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                                    'sub-{sj}'.format(sj = participant), fit_type)
+            stats_dir = op.join(self.stats_outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
 
             # load GLM estimates, and get betas and prediction
             betas = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 
@@ -1460,7 +1180,7 @@ class GLM_Model(somaModel):
         # calculate COM for all vertices
         if isinstance(region_betas, dict):
             for side in region_betas.keys():
-                COM_all = COM(region_betas[side])
+                COM_all = self.COM(region_betas[side])
             
                 COM_surface = np.zeros(region_mask[side].shape); COM_surface[:] = np.nan
                 COM_surface[np.where((~np.isnan(region_mask[side])))[0]] = COM_all[np.where((~np.isnan(region_mask[side])))[0]]
@@ -1469,7 +1189,7 @@ class GLM_Model(somaModel):
                 np.save(op.join(out_dir, 'zmask_reg-{r}_{s}.npy'.format(r = region, s = side)), region_mask[side])
 
         else:
-            COM_all = COM(region_betas)
+            COM_all = self.COM(region_betas)
             
             COM_surface = np.zeros(region_mask.shape); COM_surface[:] = np.nan
             COM_surface[np.where((~np.isnan(region_mask)))[0]] = COM_all[np.where((~np.isnan(region_mask)))[0]]
@@ -1580,14 +1300,12 @@ class GLM_Model(somaModel):
         """
 
         ## make new out dir, depeding on our HRF approach
-        out_dir = op.join(self.MRIObj.derivatives_pth, 'glm_stats', 
-                                        'sub-{sj}'.format(sj = participant), 'F_stat', fit_type)
+        out_dir = op.join(self.stats_outputdir, 'sub-{sj}'.format(sj = participant), 'F_stat', fit_type)
         # if output path doesn't exist, create it
         os.makedirs(out_dir, exist_ok = True)
 
         # get list with gii files
-        gii_filenames = self.get_soma_file_list(participant, 
-                                            file_ext = self.MRIObj.params['fitting']['soma']['extension'])
+        gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
         
         if fit_type == 'mean_run':         
             # load data of all runs and average
@@ -1674,8 +1392,7 @@ class somaRF_Model(somaModel):
         # if output dir not defined, then make it in derivatives
         if outputdir is None:
             self.outputdir = op.join(self.MRIObj.derivatives_pth, 'somaRF_fits')
-        else:
-            self.outputdir = outputdir
+
     
     def gauss1D_cart(self, x, mu=0.0, sigma=1.0):
         
@@ -1854,18 +1571,15 @@ class somaRF_Model(somaModel):
         # if leave one out, get average of CV betas
         if fit_type == 'loo_run':
             # get all run lists
-            run_loo_list = somaModelObj.get_run_list(somaModelObj.get_soma_file_list(participant, 
-                                                file_ext = self.MRIObj.params['fitting']['soma']['extension']))
+            run_loo_list = somaModelObj.get_run_list(somaModelObj.get_proc_file_list(participant, 
+                                                                                     file_ext = self.proc_file_ext))
 
             ## get average beta values 
             betas, _ = somaModelObj.average_betas(participant, fit_type = fit_type, 
                                                         weighted_avg = True, runs2load = run_loo_list)
         else:
             # load GLM estimates, and get betas and prediction
-            soma_estimates = np.load(op.join(somaModelObj.outputdir, 'sub-{sj}'.format(sj = participant), 
-                                            fit_type, 'estimates_run-{rt}.npy'.format(rt = fit_type.split('_')[0])), 
-                                            allow_pickle=True).item()
-            betas = soma_estimates['betas']
+            betas = somaModelObj.load_GLMestimates(participant, fit_type = fit_type, run_id = None)['betas']
 
         ## Get DM
         design_matrix = self.load_design_matrix(participant, keep_b_evs = keep_b_evs, 

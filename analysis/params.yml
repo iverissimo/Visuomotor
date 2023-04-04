@@ -18,6 +18,7 @@ general:
   paths:
     local:
       root: '/Volumes/Verissimo_Seagate_Hub_Plus/Projects/Visuomotor/Data'
+      atlas: 'atlas/Glasser_et_al_2016_HCP_MMP1.0_qN_RVVG/HCP_PhaseTwo/Q1-Q6_RelatedParcellation210/MNINonLinear/fsaverage_LR32k'
     lisa:
       root: '/project/projects_verissimo/Visuomotor_data'
       batch: '/home/inesv/batch'
