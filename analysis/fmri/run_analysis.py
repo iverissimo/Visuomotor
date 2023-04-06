@@ -126,7 +126,7 @@ model2fit = args.model2fit
 run_type = args.run_type
 
 ## prf options
-fit_hrf = args.fit_hrf
+fit_hrf = bool(args.fit_hrf)
 chunk_num = args.chunk_num
 vertex = args.vertex
 ROI = args.ROI
@@ -162,7 +162,7 @@ elif py_cmd == 'fmriprep':
                      node_mem = 5000, batch_mem_Gib = batch_mem_Gib, run_time = run_time)
 
 # if running prf analysis
-if task in ['pRF', 'prf']:
+if task.lower() == 'prf': 
 
     # load data model
     data_model = prfModel(Visuomotor_data)
@@ -171,7 +171,7 @@ if task in ['pRF', 'prf']:
     if py_cmd == 'fit_prf':
 
         # if we want to fit HRF params
-        data_model.fit_hrf = True if bool(fit_hrf) == True else False
+        data_model.fit_hrf = fit_hrf
 
         # get participant models, which also will load DM
         pp_prf_models = data_model.set_models(participant_list = data_model.MRIObj.sj_num, filter_predictions = True)

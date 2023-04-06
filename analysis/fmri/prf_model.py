@@ -21,6 +21,8 @@ import cortex
 
 from model import Model
 
+from joblib import Parallel, delayed
+
 class prfModel(Model):
 
     def __init__(self, MRIObj, outputdir = None):
@@ -495,6 +497,28 @@ class prfModel(Model):
 
         return constraints
 
+    def crossvalidate(self, test_data, model_object = None, estimates = []):
+
+        """
+        Use previously fit parameters to obtain cross-validated Rsq
+        on test data
+
+        """
+
+        # if we fit HRF, use median HRF estimates for crossvalidation
+        if self.fit_hrf and estimates.shape[0] > 1: 
+            median_hrf_params = np.nanmedian(estimates[:,-3:-1], axis = 0)
+            estimates[:,-3:-1] = median_hrf_params
+
+        # get model prediciton for all vertices
+        prediction = Parallel(n_jobs=-1, verbose=10)(delayed(model_object.return_prediction)(*list(estimates[vert, :-1])) for vert in range(test_data.shape[0]))
+        prediction = np.squeeze(prediction, axis=1)
+
+        #calculate CV-rsq        
+        CV_rsq = np.nan_to_num(1-np.sum((test_data-prediction)**2, axis=-1)/(test_data.shape[-1]*test_data.var(-1)))
+        
+        return CV_rsq
+
 
     def fit_data(self, participant, pp_prf_models = None, 
                     fit_type = 'mean_run', chunk_num = None, vertex = None, ROI = None,
@@ -548,7 +572,7 @@ class prfModel(Model):
                 
                 data2fit.append(self.load_data4fitting(files2fit, average = True)[np.newaxis,...]) # [1, vertex, TR]
 
-            data2fit = np.vstack(data2fit)
+            data2fit = np.vstack(data2fit) # [runs, vertex, TR]
 
         ## loop over runs
         for r_ind in range(data2fit.shape[0]):
@@ -577,6 +601,11 @@ class prfModel(Model):
 
             ## chunk data
             chunk2fit = self.chunk_data(data2fit[r_ind], chunk_num = chunk_num, vertex = vertex, ROI = ROI)
+
+            # load left out run data, if its the case
+            if fit_type == 'loo_run':
+                other_run_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)) in file], average = True)
+                loo_chunk2fit = self.chunk_data(other_run_data, chunk_num = chunk_num, vertex = vertex, ROI = ROI)
 
             ## ACTUALLY FIT 
 
@@ -618,6 +647,15 @@ class prfModel(Model):
                                         #starting_params = gauss_fitter.gridsearch_params,
                                         xtol = xtol,
                                         ftol = ftol)
+                
+                if fit_type == 'loo_run': 
+                    # calculate cv-r2
+                    print('Calculate CV-rsq for left out run run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)))
+                    CV_r2 = self.crossvalidate(loo_chunk2fit,
+                                                model_object = pp_prf_models['sub-{sj}'.format(sj = participant)]['gauss_model'], 
+                                                estimates = gauss_fitter.iterative_search_params)
+                else:
+                    CV_r2 = None
 
                 # if we want to save estimates
                 if save_estimates and not op.isfile(it_gauss_filename):
@@ -628,7 +666,7 @@ class prfModel(Model):
                     # for it
                     print('saving %s'%it_gauss_filename)
                     self.save_pRF_model_estimates(it_gauss_filename, gauss_fitter.iterative_search_params, 
-                                                    model_type = 'gauss')
+                                                    model_type = 'gauss', CV_rsq = CV_r2)
 
                 if model2fit != 'gauss':
 
@@ -689,6 +727,15 @@ class prfModel(Model):
                                         #starting_params = fitter.gridsearch_params, 
                                         xtol = xtol,
                                         ftol = ftol)
+                    
+                    if fit_type == 'loo_run': 
+                        # calculate cv-r2
+                        print('Calculate CV-rsq for left out run run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)))
+                        CV_r2 = self.crossvalidate(loo_chunk2fit,
+                                                    model_object = pp_prf_models['sub-{sj}'.format(sj = participant)]['{key}_model'.format(key = model2fit)], 
+                                                    estimates = fitter.iterative_search_params)
+                    else:
+                        CV_r2 = None
 
                     # if we want to save estimates
                     if save_estimates:
@@ -699,7 +746,7 @@ class prfModel(Model):
                         # for it
                         print('saving %s'%it_model_filename)
                         self.save_pRF_model_estimates(it_model_filename, fitter.iterative_search_params, 
-                                                        model_type = model2fit)
+                                                        model_type = model2fit, CV_rsq = CV_r2)
 
         if not save_estimates:
             # if we're not saving them, assume we are running on the spot
@@ -714,7 +761,7 @@ class prfModel(Model):
             return estimates, chunk2fit
 
     
-    def save_pRF_model_estimates(self, filename, final_estimates, model_type = 'gauss', grid = False):
+    def save_pRF_model_estimates(self, filename, final_estimates, model_type = 'gauss', grid = False, CV_rsq = None):
     
         """
         re-arrange estimates that were masked
@@ -735,6 +782,9 @@ class prfModel(Model):
 
         # make dir if it doesnt exist already
         os.makedirs(op.split(filename)[0], exist_ok = True)
+
+        if CV_rsq is None:
+            CV_rsq = np.zeros(final_estimates.shape[0]); CV_rsq[:] = np.nan
                 
         if model_type == 'gauss':
 
@@ -747,7 +797,8 @@ class prfModel(Model):
                         baseline = final_estimates[..., 4],
                         hrf_derivative = final_estimates[..., 5],
                         hrf_dispersion = final_estimates[..., 6], 
-                        r2 = final_estimates[..., 7])
+                        r2 = final_estimates[..., 7],
+                        cv_r2 = CV_rsq)
             
             else:
                 np.savez(filename,
@@ -756,7 +807,8 @@ class prfModel(Model):
                         size = final_estimates[..., 2],
                         betas = final_estimates[...,3],
                         baseline = final_estimates[..., 4],
-                        r2 = final_estimates[..., 5])
+                        r2 = final_estimates[..., 5],
+                        cv_r2 = CV_rsq)
         
         elif model_type == 'css':
 
@@ -770,7 +822,8 @@ class prfModel(Model):
                         ns = final_estimates[..., 5],
                         hrf_derivative = final_estimates[..., 6],
                         hrf_dispersion = final_estimates[..., 7], 
-                        r2 = final_estimates[..., 8])
+                        r2 = final_estimates[..., 8],
+                        cv_r2 = CV_rsq)
             
             else:
                 np.savez(filename,
@@ -780,7 +833,8 @@ class prfModel(Model):
                         betas = final_estimates[...,3],
                         baseline = final_estimates[..., 4],
                         ns = final_estimates[..., 5],
-                        r2 = final_estimates[..., 6])
+                        r2 = final_estimates[..., 6],
+                        cv_r2 = CV_rsq)
 
         elif model_type == 'dn':
 
@@ -797,7 +851,8 @@ class prfModel(Model):
                         sb = final_estimates[..., 8], 
                         hrf_derivative = final_estimates[..., 9],
                         hrf_dispersion = final_estimates[..., 10], 
-                        r2 = final_estimates[..., 11])
+                        r2 = final_estimates[..., 11],
+                        cv_r2 = CV_rsq)
             
             else:
                 np.savez(filename,
@@ -810,7 +865,8 @@ class prfModel(Model):
                         ss = final_estimates[..., 6], 
                         nb = final_estimates[..., 7], 
                         sb = final_estimates[..., 8], 
-                        r2 = final_estimates[..., 9])
+                        r2 = final_estimates[..., 9],
+                        cv_r2 = CV_rsq)
 
         elif model_type == 'dog':
 
@@ -825,7 +881,8 @@ class prfModel(Model):
                         ss = final_estimates[..., 6], 
                         hrf_derivative = final_estimates[..., 7],
                         hrf_dispersion = final_estimates[..., 8], 
-                        r2 = final_estimates[..., 9])
+                        r2 = final_estimates[..., 9],
+                        cv_r2 = CV_rsq)
             
             else:
                 np.savez(filename,
@@ -836,7 +893,8 @@ class prfModel(Model):
                         baseline = final_estimates[..., 4],
                         sa = final_estimates[..., 5],
                         ss = final_estimates[..., 6], 
-                        r2 = final_estimates[..., 7])
+                        r2 = final_estimates[..., 7],
+                        cv_r2 = CV_rsq)
 
     
     def chunk_data(self, data, chunk_num = None, vertex = None, ROI = None):

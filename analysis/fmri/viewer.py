@@ -5011,8 +5011,7 @@ class pRFViewer(Viewer):
 
         # Load pRF data
         # get list with gii files
-        gii_filenames = self.pRFModelObj.get_prf_file_list(participant, 
-                                            file_ext = self.pRFModelObj.MRIObj.params['fitting']['prf']['extension'])
+        gii_filenames = self.pRFModelObj.get_proc_file_list(participant, file_ext = self.pRFModelObj.MRIObj.params['fitting']['prf']['extension'])
 
         if fit_type == 'mean_run':         
             # load data of all runs

@@ -172,7 +172,7 @@ fitting:
     max_n: 1.1
     n_nr: 20
 
-    grid_nr: 40 #20 
+    grid_nr: 10 #40 #20 
 
     estimate_keys: {'gauss': ['x','y','size','betas','baseline','r2'],
                     'css': ['x','y','size','betas','baseline','ns', 'r2'],
