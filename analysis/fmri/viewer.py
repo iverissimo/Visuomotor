@@ -176,6 +176,13 @@ class Viewer:
             which hemisphere (LH, RH or BH - both)
         """
 
+        # check if atlas df exists
+        try:
+            self.atlas_df
+        except AttributeError:
+            # load atlas ROI df
+            self.get_atlas_roi_df(return_RGBA = False)
+
         roi_vert = []
 
         for roi2plot in roi_list:
@@ -287,6 +294,8 @@ class Viewer:
         # rotate
         if theta is None:
             theta = np.arctan((x_v1)/(y_v1))  
+        elif theta == 'minor':
+            theta = np.arctan((x_v2)/(y_v2))  
         else:
             print('using input theta value')
         rotation_mat = np.matrix([[np.cos(theta), -np.sin(theta)],
@@ -1131,7 +1140,156 @@ class Viewer:
 
         return surf_dists
 
+    def get_handband_deltaBIC_df(self, df_summary_models):
+        
+        """
+        Given summary DF (with BIC values for linear and piecewise models)
+        make DF with delta BIC --> if positive, then piecewise fits data better than linear
 
+        Parameters
+        ----------
+        df_summary_models: DataFrame
+            dataframe with BIC values for all handband rois
+        """
+
+        df_bic_diff = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'movement_region': [], 'delta_BIC': []})
+
+        for pp in df_summary_models.sj.unique():
+            for rname in df_summary_models.ROI.unique():
+                for hemi in df_summary_models.hemisphere.unique():
+                    for movement_region in df_summary_models.movement_region.unique():
+                    
+                        pp_df = df_summary_models[(df_summary_models['ROI'] == rname) & \
+                                            (df_summary_models['hemisphere'] == hemi) & \
+                                            (df_summary_models['sj'] == pp) & \
+                                            (df_summary_models['movement_region'] == movement_region)]
+                        
+                        # if is infinite (due to poor model fit) replace with nan
+                        if np.isinf(pp_df[pp_df['model'] == 'linear']['BIC'].values) or \
+                            np.isinf(pp_df[pp_df['model'] == 'piecewise']['BIC'].values):
+                            delta_bic = np.nan
+                        else:
+                            delta_bic = pp_df[pp_df['model'] == 'linear']['BIC'].values - pp_df[pp_df['model'] == 'piecewise']['BIC'].values
+
+                        # append
+                        df_bic_diff = pd.concat((df_bic_diff,
+                                                pd.DataFrame({'sj': [pp], 
+                                                            'ROI': [rname], 
+                                                            'hemisphere': [hemi], 
+                                                            'movement_region': [movement_region], 
+                                                            'delta_BIC': delta_bic
+                                                            })), ignore_index = True)
+                        
+        ## fill nan with 0s
+        df_bic_diff['delta_BIC'] = df_bic_diff['delta_BIC'].fillna(0)
+
+        return df_bic_diff
+
+    def plot_deltaBIC(self, df_bic_diff, bar_color = 'teal'):
+
+        """
+        plot BIC for handband, quite crude for now, will generalize later
+        """
+
+        fig, axs = plt.subplots(1, len(df_bic_diff.ROI.unique()), figsize=(int(len(df_bic_diff.ROI.unique()) * 3.75) ,15),
+                       sharey = True, dpi = 200)
+
+        for ind, rname in enumerate(df_bic_diff.ROI.unique()):
+            
+            # plot barplot for roi
+            g1 = sns.barplot(x = 'ROI', y = 'delta_BIC', 
+                    data = df_bic_diff[df_bic_diff['ROI'] == rname], 
+                        estimator = np.mean, ci=68,
+                    capsize = .3 ,linewidth = 3, errcolor= 'k',errwidth = 3,
+                            ax=axs[ind], color = bar_color)
+            
+            # remove axis labels
+            g1.set(xlabel=None)
+            g1.set(ylabel=None)
+            
+            # calc t test against 0
+            p_val_ttest = scipy.stats.ttest_1samp(df_bic_diff[df_bic_diff['ROI'] == rname].delta_BIC, 
+                                                popmean=0, alternative='greater')[1]
+            print(p_val_ttest)
+            
+            # if significant, then add asterisk
+            if p_val_ttest < 0.001:
+                axs[ind].annotate('***', (.32,.92), xycoords='axes fraction',fontsize=60)
+            elif p_val_ttest < 0.01:
+                axs[ind].annotate('**', (.38,.92), xycoords='axes fraction',fontsize=60)
+            elif p_val_ttest < 0.05:
+                axs[ind].annotate('*', (.42,.92), xycoords='axes fraction',fontsize=60)
+            
+            # set title
+            axs[ind].set_title(int(re.findall('\d{1,2}',rname)[0]),fontsize=55, pad=30)
+            
+            # remove x and y ticks
+            axs[ind].set_xticks([])
+            #axs[ind]
+
+        # format y ticks and label
+        axs[0].set_ylabel(r'$\Delta$ BIC', fontsize = 55, labelpad = 30)
+        axs[0].tick_params(axis='y',labelsize=35)
+
+        #fig.subplots_adjust(hspace=0.5, right=.82)
+        #fig.autofmt_xdate(rotation=90)
+
+        return fig
+    
+    def plot_piecewisefits(self, df_predictions, bestfit_pp_roi = None, participant_list = [], roi_ind_list = [8,9,10,11],
+                                y_var = 'prediction_COM', x_var = 'prediction_y_coordinates', 
+                                y_label = 'COM', x_label = 'y coordinates (mm)', ymin = 0, ymax = 4):
+
+        """
+        plot model fits for handband, across participants and averaged
+        quite crude for now, will generalize later
+        """
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+
+        fig, axs = plt.subplots(1, len(roi_names_list), figsize=(int(len(roi_names_list) * 3.75) ,5),
+                       sharey = True, dpi = 200)
+
+        for ind, rname in enumerate(roi_names_list):
+            
+            # check number of participants where model fitted better than linear 
+            #num_pp_roi = len(bestfit_pp_roi[rname])
+            
+            #if num_pp_roi > len(participant_list)/2: # if more than half the participants, then still plot  
+            
+            # plot lineplot for roi
+            sns.lineplot(data = df_predictions[df_predictions['ROI'] == rname], 
+                            x = x_var, y = y_var,
+                            ci = None, linewidth = 1, alpha = .3, hue = 'sj', ax=axs[ind])
+            g1 = sns.lineplot(data = df_predictions[df_predictions['ROI'] == rname], 
+                                x = x_var, y = y_var,
+                                ci = None, linewidth = 3, ax=axs[ind], color = 'k')
+        
+            # remove axis labels
+            g1.set(xlabel=None)
+            g1.set(ylabel=None)
+            axs[ind].get_legend().remove()
+            #else:
+            #    axs[ind].annotate('n.a.', (.22,.5), xycoords='axes fraction',fontsize=60)
+            #    # remove x 
+            #    axs[ind].set_xticks([])
+            
+            # set title
+            axs[ind].set_title(int(re.findall('\d{1,2}',rname)[0]),fontsize=55, pad=30)
+
+            # limit y
+            axs[ind].tick_params(axis='x',labelsize=30)
+            
+            if ind == 0:
+                axs[ind].set_xlabel(x_label, fontsize = 55, labelpad = 30, loc = 'left')
+            
+        # format y ticks and label
+        axs[0].set_ylim([ymin,ymax])
+        axs[0].set_ylabel(y_label, fontsize = 55, labelpad = 30)
+        axs[0].tick_params(axis='y',labelsize=30)
+
+        return fig
 
 class somaViewer(Viewer):
 
@@ -1611,104 +1769,6 @@ class somaViewer(Viewer):
         axs[0].set_ylim([-1,1])
 
         return fig
-
-
-    def get_handband_deltaBIC_df(self, df_summary_models):
-        
-        """
-        Given summary DF (with BIC values for linear and piecewise models)
-        make DF with delta BIC --> if positive, then piecewise fits data better than linear
-
-        Parameters
-        ----------
-        df_summary_models: DataFrame
-            dataframe with BIC values for all handband rois
-        """
-
-        df_bic_diff = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'movement_region': [], 'delta_BIC': []})
-
-        for pp in df_summary_models.sj.unique():
-            for rname in df_summary_models.ROI.unique():
-                for hemi in df_summary_models.hemisphere.unique():
-                    for movement_region in df_summary_models.movement_region.unique():
-                    
-                        pp_df = df_summary_models[(df_summary_models['ROI'] == rname) & \
-                                            (df_summary_models['hemisphere'] == hemi) & \
-                                            (df_summary_models['sj'] == pp) & \
-                                            (df_summary_models['movement_region'] == movement_region)]
-                        
-                        # if is infinite (due to poor model fit) replace with nan
-                        if np.isinf(pp_df[pp_df['model'] == 'linear']['BIC'].values) or \
-                            np.isinf(pp_df[pp_df['model'] == 'piecewise']['BIC'].values):
-                            delta_bic = np.nan
-                        else:
-                            delta_bic = pp_df[pp_df['model'] == 'linear']['BIC'].values - pp_df[pp_df['model'] == 'piecewise']['BIC'].values
-
-                        # append
-                        df_bic_diff = pd.concat((df_bic_diff,
-                                                pd.DataFrame({'sj': [pp], 
-                                                            'ROI': [rname], 
-                                                            'hemisphere': [hemi], 
-                                                            'movement_region': [movement_region], 
-                                                            'delta_BIC': delta_bic
-                                                            })), ignore_index = True)
-                        
-        ## fill nan with 0s
-        df_bic_diff['delta_BIC'] = df_bic_diff['delta_BIC'].fillna(0)
-
-        return df_bic_diff
-
-    def plot_deltaBIC(self, df_bic_diff):
-
-        """
-        plot BIC for handband, quite crude for now, will generalize later
-        """
-
-        fig, axs = plt.subplots(1, len(df_bic_diff.ROI.unique()), figsize=(int(len(df_bic_diff.ROI.unique()) * 3.75) ,15),
-                       sharey = True, dpi = 200)
-
-        for ind, rname in enumerate(df_bic_diff.ROI.unique()):
-            
-            # plot barplot for roi
-            g1 = sns.barplot(x = 'ROI', y = 'delta_BIC', 
-                    data = df_bic_diff[df_bic_diff['ROI'] == rname], 
-                        estimator = np.mean, ci=68,
-                    capsize = .3 ,linewidth = 3, errcolor= 'k',errwidth = 3,
-                            ax=axs[ind], color = 'teal')
-            
-            # remove axis labels
-            g1.set(xlabel=None)
-            g1.set(ylabel=None)
-            
-            # calc t test against 0
-            p_val_ttest = scipy.stats.ttest_1samp(df_bic_diff[df_bic_diff['ROI'] == rname].delta_BIC, 
-                                                popmean=0, alternative='greater')[1]
-            #print(p_val_ttest)
-            
-            # if significant, then add asterisk
-            if p_val_ttest < 0.001:
-                axs[ind].annotate('***', (.32,.92), xycoords='axes fraction',fontsize=60)
-            elif p_val_ttest < 0.01:
-                axs[ind].annotate('**', (.38,.92), xycoords='axes fraction',fontsize=60)
-            elif p_val_ttest < 0.05:
-                axs[ind].annotate('*', (.42,.92), xycoords='axes fraction',fontsize=60)
-            
-            # set title
-            axs[ind].set_title(int(re.findall('\d{1,2}',rname)[0]),fontsize=55, pad=30)
-            
-            # remove x and y ticks
-            axs[ind].set_xticks([])
-            #axs[ind]
-
-        # format y ticks and label
-        axs[0].set_ylabel(r'$\Delta$ BIC', fontsize = 55, labelpad = 30)
-        axs[0].tick_params(axis='y',labelsize=35)
-
-        #fig.subplots_adjust(hspace=0.5, right=.82)
-        #fig.autofmt_xdate(rotation=90)
-
-        return fig
-
 
     def open_click_viewer(self, participant, custom_dm = True, model2plot = 'glm', data_RFmodel = None,
                                             fit_type = 'mean_run', keep_b_evs = False, fixed_effects = True):
@@ -2694,7 +2754,7 @@ class somaViewer(Viewer):
 
     def get_COM_piecewise4plotting(self, handband_COM_df, df_summary_models = None,
                                     participant_list = [], hemi = 'LH', movement_region = 'R_hand', roi_ind_list = [8,9,10,11],
-                                    r_thresh = .1):
+                                    r_thresh = .1, vmin = 0, vmax = 4):
         
         """
         Get piecewise model prediction array, given fitted coefficients,
@@ -2762,12 +2822,17 @@ class somaViewer(Viewer):
                     prediction_arr = np.zeros(len(prediction_y_coord)); prediction_arr[:] = np.nan
                     
                 else:
-                    coeff = pp_models_df[pp_models_df['model'] == 'piecewise'].coeffs.values[0]
-                    prediction_arr = self.somaModelObj.piecewise_linear(prediction_y_coord, *coeff)
-                    
                     # if piecewise was a better fit, store for bookeeping
                     if pp_models_df[pp_models_df['model'] == 'piecewise'].BIC.values < pp_models_df[pp_models_df['model'] == 'linear'].BIC.values:
+                        coeff = pp_models_df[pp_models_df['model'] == 'piecewise'].coeffs.values[0]
+                        prediction_arr = self.pRFModelObj.piecewise_linear(prediction_y_coord, *coeff)
                         bestfit_pp_roi[rname].append(pp)
+                    else:
+                        # use linear model
+                        coeff = pp_models_df[pp_models_df['model'] == 'linear'].coeffs.values[0]
+                        prediction_arr = self.pRFModelObj.linear_func(dm = np.vstack((prediction_y_coord, 
+                                                                                    np.ones(prediction_y_coord.shape))).T, 
+                                                                    betas = coeff)
 
                 # append in dataframe
                 df_predictions = pd.concat((df_predictions,
@@ -2775,66 +2840,11 @@ class somaViewer(Viewer):
                                                         'ROI': np.tile(rname, len(prediction_arr)), 
                                                         'hemisphere': np.tile(hemi, len(prediction_arr)),  
                                                         'movement_region': np.tile(movement_region, len(prediction_arr)),
-                                                        'prediction_COM': prediction_arr, 
+                                                        'prediction_COM': np.clip(prediction_arr, vmin, vmax), 
                                                         'prediction_y_coordinates': prediction_y_coord})
                                         ), ignore_index = True)
 
         return df_predictions, bestfit_pp_roi
-
-    def plot_piecewisefits(self, df_predictions, bestfit_pp_roi = None,
-                                        participant_list = [], roi_ind_list = [8,9,10,11]):
-
-        """
-        plot model fits for handband, across participants and averaged
-        quite crude for now, will generalize later
-        """
-
-        # get list of ROIs to plot
-        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
-
-        fig, axs = plt.subplots(1, len(roi_names_list), figsize=(int(len(roi_names_list) * 3.75) ,5),
-                       sharey = True, dpi = 200)
-
-        for ind, rname in enumerate(roi_names_list):
-            
-            # check number of participants where model fitted better than linear 
-            num_pp_roi = len(bestfit_pp_roi[rname])
-            
-            if num_pp_roi > len(participant_list)/2: # if more than half the participants, then still plot  
-            
-                # plot lineplot for roi
-                sns.lineplot(data = df_predictions[df_predictions['ROI'] == rname], 
-                                x = 'prediction_y_coordinates', y = 'prediction_COM',
-                                ci = None, linewidth = 1, alpha = .3, hue = 'sj', ax=axs[ind])
-                g1 = sns.lineplot(data = df_predictions[df_predictions['ROI'] == rname], 
-                                    x = 'prediction_y_coordinates', y = 'prediction_COM',
-                                    ci = None, linewidth = 3, ax=axs[ind], color = 'k')
-            
-                # remove axis labels
-                g1.set(xlabel=None)
-                g1.set(ylabel=None)
-                axs[ind].get_legend().remove()
-            else:
-                axs[ind].annotate('n.a.', (.22,.5), xycoords='axes fraction',fontsize=60)
-                # remove x 
-                axs[ind].set_xticks([])
-            
-            # set title
-            axs[ind].set_title(int(re.findall('\d{1,2}',rname)[0]),fontsize=55, pad=30)
-
-            # limit y
-            axs[ind].tick_params(axis='x',labelsize=30)
-            
-            if ind == 0:
-                axs[ind].set_xlabel('y coordinates (mm)', fontsize = 55, labelpad = 30, loc = 'left')
-            
-        # format y ticks and label
-        axs[0].set_ylim([0,4])
-        axs[0].set_ylabel('COM', fontsize = 55, labelpad = 30)
-        axs[0].tick_params(axis='y',labelsize=30)
-
-        return fig
-
 
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
                                     n_bins = 256, custom_dm = True, keep_b_evs = False,
@@ -3288,7 +3298,7 @@ class somaViewer(Viewer):
 
 class pRFViewer(Viewer):
 
-    def __init__(self, pRFModelObj, outputdir = None, pysub = 'fsaverage'):
+    def __init__(self, pRFModelObj, outputdir = None, pysub = 'fsaverage4drawing'):
         
         """__init__
         constructor for class 
@@ -3400,6 +3410,7 @@ class pRFViewer(Viewer):
         guaranteeing a non-uniform representation
         (this is, when we want to use half the color wheel to show the pa values)
         (useful for better visualization of boundaries)
+        
         Parameters
         ----------
         xx : arr
@@ -3452,6 +3463,585 @@ class pRFViewer(Viewer):
         rgb_angle[rsq > rsq_thresh] = colors.hsv_to_rgb(hsv_angle[rsq > rsq_thresh])
 
         return rgb_angle
+    
+    def get_polar_angle(self, xx = [], yy = [], rsq = [], pa_transform = 'mirror'):
+
+        """
+        Helper function that calculates PA and returns array of
+        PA values (which can also be transformed in some way)
+
+        Parameters
+        ----------
+        xx : arr
+            array with x position values
+        yy : arr
+            array with y position values
+        rsq: arr
+            rsq values, to be used as alpha level/threshold
+        pa_transform: str
+            if None, no transform, else will be:
+            mirror - hemipsheres are mirrored, and meridians are over represented
+            norm - normalized PA between 0 and 1
+        """
+
+        ## calculate polar angle
+        polar_angle = np.angle(xx + yy * 1j)
+
+        if pa_transform is not None:
+
+            if pa_transform == 'mirror':
+                ## get pa values transformed like in figure 8 of Larsson and Heeger 2006
+                # --> Horizontal meridian = 0
+                # --> upper VF goes from 0 to pi/2
+                # --> lower VF goes from 0 to -pi/2
+
+                polar_angle_out = polar_angle.copy()
+
+                # angles from pi/2 to pi (upper left quadrant)
+                ind_ang = np.where((polar_angle > np.pi/2))[0]
+                polar_angle_out[ind_ang] = (polar_angle_out[ind_ang] - np.pi)* -1 # minus pi, then taking absolute (positive) value
+
+                # angles from -pi/2 to -pi (lower left quadrant)
+                ind_ang = np.where((polar_angle < -np.pi/2))[0]
+                polar_angle_out[ind_ang] = (polar_angle_out[ind_ang] + np.pi) * -1 
+
+            elif pa_transform == 'norm':
+                polar_angle_out = ((polar_angle + np.pi) / (np.pi * 2.0)) # normalize PA between 0 and 1
+                
+        else:
+            polar_angle_out = polar_angle
+
+        polar_angle_out[np.where((np.isnan(rsq)))[0]] = np.nan
+
+        return polar_angle_out
+
+    def get_eccentricity(self, xx = [], yy = [], rsq = []):
+
+        """
+        Helper function that calculates eccentricity and returns array 
+
+        Parameters
+        ----------
+        xx : arr
+            array with x position values
+        yy : arr
+            array with y position values
+        rsq: arr
+            rsq values, to be used as alpha level/threshold
+        """
+
+        ## calculate eccentricity
+        eccentricity = np.abs(xx + yy * 1j)
+
+        # mask nans
+        eccentricity[np.where((np.isnan(rsq)))[0]] = np.nan
+
+        return eccentricity
+
+    def get_handband_PA_df(self, group_estimates, participant_list = [], roi_coord = {}, roi_verts = {}, 
+                           pa_transform = 'mirror'):
+
+        """
+        For handband, get PA values for each participant, hemisphere and ROI
+
+        Parameters
+        ----------
+        group_estimates: dict
+            pRF estimates for all participants
+        participant_list: list
+            list with participant ID   
+        roi_coord: DF/dict
+            x-y coordinates for each ROI and hemisphere
+        roi_verts: DF/dict
+            vertex number for each ROI and hemisphere
+        pa_transform: str
+            if None, no transform, else will be:
+            mirror - hemipsheres are mirrored, and meridians are over represented
+            norm - normalized PA between 0 and 1
+        """
+
+        # initialize DF to save estimates
+        handband_PA_df = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'x_coordinates': [], 'y_coordinates': [],
+                                        'PA': [], 'ECC': [], 'r2': [], 'vertex': []})
+
+        for pp in participant_list:
+
+            r2_pp = group_estimates['sub-{sj}'.format(sj = pp)]['r2']
+            pa_pp = self.get_polar_angle(xx = group_estimates['sub-{sj}'.format(sj = pp)]['x'], 
+                                            yy = group_estimates['sub-{sj}'.format(sj = pp)]['y'], 
+                                            rsq = group_estimates['sub-{sj}'.format(sj = pp)]['r2'], 
+                                            pa_transform = pa_transform)
+            ecc_pp = self.get_eccentricity(xx = group_estimates['sub-{sj}'.format(sj = pp)]['x'], 
+                                            yy = group_estimates['sub-{sj}'.format(sj = pp)]['y'], 
+                                            rsq = group_estimates['sub-{sj}'.format(sj = pp)]['r2'])
+
+            # select values per hemisphere
+            for hemi in self.hemi_labels:
+                # and ROI
+                for rname in roi_coord[hemi].keys():
+                    
+                    # select PA values for hemi and ROI
+                    pa_roi_hemi = pa_pp[roi_verts[hemi][rname]]
+
+                    # mask out regions that are nan
+                    mask_bool = (~np.isnan(pa_roi_hemi)).astype(bool)
+
+                    # save values in df
+                    handband_PA_df = pd.concat((handband_PA_df,
+                                                pd.DataFrame({'sj': np.tile(pp, len(pa_roi_hemi[mask_bool])), 
+                                                            'ROI': np.tile(rname, len(pa_roi_hemi[mask_bool])), 
+                                                            'hemisphere': np.tile(hemi, len(pa_roi_hemi[mask_bool])), 
+                                                            'x_coordinates': roi_coord[hemi][rname][0][mask_bool], 
+                                                            'y_coordinates': roi_coord[hemi][rname][1][mask_bool],
+                                                            'PA': pa_roi_hemi[mask_bool], 
+                                                            'ECC': ecc_pp[roi_verts[hemi][rname]][mask_bool], 
+                                                            'r2': r2_pp[roi_verts[hemi][rname]][mask_bool], 
+                                                            'vertex': roi_verts[hemi][rname][mask_bool]
+                                                            })
+                                                ), ignore_index = True)
+        
+        return handband_PA_df
+    
+    def plot_handband_PA_scatter(self, participant_list, prf_model_name = 'css', fit_type = 'mean_run', 
+                                        max_ecc_ext = None, mask_arr = True, pa_transform = 'mirror',
+                                        rsq_threshold = .2, iterative = True, pysub = None):
+
+        """
+        Plot PA values in scatter plot, for all handband ROIs
+        Vertically oriented, and sorted from anterior to posterior
+        
+        Parameters
+        ----------
+        participant_list: list
+            list with participant ID 
+        r_thresh: float
+            if putting a rsquare threshold on the data being showed
+        """
+
+        # if pycortex subject not specified
+        if pysub is None:
+            pysub = self.pysub
+
+        # set figures path
+        figures_pth = op.join(self.outputdir, 'handband_PA', fit_type)
+
+        ## get vertex dictionary for hand band
+        LH_roi_verts, RH_roi_verts = self.get_ROI_verts_dict(pysub = pysub, 
+                                                            ROIs = "handband_\d{1,2}", split_hemi = True)
+        # save in dict for ease of use
+        roi_verts = {'LH': LH_roi_verts, 'RH': RH_roi_verts}
+
+        ## get surface x and y coordinates, for each hemisphere
+        x_coord_surf, y_coord_surf, _ = self.get_fs_coords(merge = True)
+        
+        ## ROTATE COORDINATES IN MAIN AXIS
+        roi_coord = {'LH': {}, 'RH': {}}
+
+        for hemi in self.hemi_labels:
+            for rname in roi_verts[hemi].keys():
+
+                roi_coord[hemi][rname] = self.transform_roi_coords(np.vstack((x_coord_surf[roi_verts[hemi][rname]], 
+                                                                            y_coord_surf[roi_verts[hemi][rname]])), 
+                                                    fig_pth = None, #op.join(self.outputdir, 'PCA_ROI'), 
+                                                    roi_name = '{rn}_{h}'.format(rn = rname, h = hemi), 
+                                                    theta = None)
+                
+        ## load group estimates 
+        group_estimates = {}
+        for pp in participant_list:
+
+            ## load estimates
+            pp_prf_est_dict, pp_prf_models = self.pRFModelObj.load_pRF_model_estimates(pp, 
+                                                                                fit_type = fit_type, 
+                                                                                model_name = prf_model_name, 
+                                                                                iterative = iterative, 
+                                                                                fit_hrf = self.pRFModelObj.fit_hrf)
+            ## mask the estimates, if such is the case
+            if mask_arr:
+                print('masking estimates')
+
+                # get estimate keys
+                keys = self.pRFModelObj.get_prf_estimate_keys(prf_model_name = prf_model_name)
+
+                if max_ecc_ext is None:
+                    # get screen limits
+                    max_ecc_ext = pp_prf_models['sub-{sj}'.format(sj = pp)]['prf_stim'].screen_size_degrees/2
+
+                # save all estimates in df
+                group_estimates['sub-{sj}'.format(sj = pp)] = self.pRFModelObj.mask_pRF_model_estimates(pp_prf_est_dict, 
+                                                                                                        ROI = None,
+                                                                                                        estimate_keys = keys,
+                                                                                                        x_ecc_lim = [- max_ecc_ext, max_ecc_ext],
+                                                                                                        y_ecc_lim = [- max_ecc_ext, max_ecc_ext], 
+                                                                                                        rsq_threshold = rsq_threshold,
+                                                                                                        pysub = pysub
+                                                                                                        )
+        
+        ## get handband PA dataframe for participant list
+        handband_PA_df = self.get_handband_PA_df(group_estimates,
+                                                    participant_list = participant_list, 
+                                                      roi_coord = roi_coord, 
+                                                      roi_verts = roi_verts, 
+                                                      pa_transform = pa_transform)
+        ## get sorted ROI names
+        # from 1 to 22 --> anterior to posterior
+        roi_names_all = np.array(sorted(handband_PA_df.ROI.unique(), 
+                                        key=lambda rn: int(re.findall('\d{1,2}',rn)[0])))
+        
+        # get cmap
+        if pa_transform == 'mirror':
+            cmap_pa = self.make_colormap(colormap = 'turbo', bins = 256, 
+                                            cmap_name = 'turbo',return_cmap = True)
+            vmin = -np.pi/2
+            vmax = np.pi/2
+
+        # for each participant, 
+        for pp in participant_list:
+            # and hemisphere, plot
+            for hemi in self.hemi_labels:
+
+                # set figure
+                fig, axs = plt.subplots(1, len(roi_names_all), figsize=(22,8), sharey=True)
+                    
+                # subselect relevant part of full DF
+                df2plot = handband_PA_df[(handband_PA_df['sj'] == pp) & \
+                                        (handband_PA_df['hemisphere'] == hemi)]
+
+                # actually plot handband
+                for ind, rname in enumerate(roi_names_all):
+
+                    im = axs[ind].scatter(df2plot[df2plot['ROI'] == rname].x_coordinates,
+                                                df2plot[df2plot['ROI'] == rname].y_coordinates,
+                                                c = df2plot[df2plot['ROI'] == rname].PA,
+                                                cmap = cmap_pa,
+                                                vmin = vmin, vmax = vmax)
+                    axs[ind].set_title(int(re.findall('\d{1,2}',rname)[0]), fontsize=20, pad=10)
+                    
+                    if ind == 0:
+                        row_label = 'Polar Angle'
+                        axs[ind].set_ylabel(row_label+'\n\ny coordinates (a.u.)', fontsize=20, labelpad=10)
+                        # change fontsize of yticks
+                        axs[ind].tick_params(axis='y',labelsize=12)
+                        
+                    # remove the x ticks
+                    axs[ind].set_xticks([])        
+
+                fig.subplots_adjust(hspace=0.5, right=.82)
+                cbar_ax = fig.add_axes([0.85, 0.15, 0.02, 0.7])
+                fig.colorbar(im, cax=cbar_ax)
+
+                fig_name = op.join(figures_pth, 'sub-{sj}'.format(sj = pp), 
+                                                'sub-{sj}_handband_scatter_hemi-{h}.png'.format(sj = pp, h=hemi)) 
+                
+                # if output path doesn't exist, create it
+                os.makedirs(op.split(fig_name)[0], exist_ok = True)
+                fig.savefig(fig_name)
+
+    def get_handband_PA_model_fit_df(self, handband_PA_df, 
+                                    participant_list = [], hemi = 'LH', roi_ind_list = [8,9,10,11],
+                                    y_max = np.pi/2):
+        
+        """
+        Fit linear vs piecewise model
+        for select handband-ROIs, hemisphere and hand movement
+        across participants
+
+        Parameters
+        ----------
+        handband_PA_df: DataFrame
+            dataframe with PA values for all handband rois
+        participant_list: list
+            list with participant ID 
+        hemi: str
+            hemisphere to focus on
+        roi_ind_list: list
+            list of handband indices to plot
+        """
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+
+        ## save relevant values
+        df_summary_models = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 'movement_region' : [],
+                                        'model': [], 'AIC': [], 'BIC': [], 'R2': [], 'coeffs': []})
+            
+        # loop over participants
+        for ind, pp in enumerate(participant_list):
+
+            # plot all columns in row (with values for the participant and handband rois in list)
+            for col_ind, rname in enumerate(roi_names_list):
+
+                # subselect relevant part of DF
+                df2plot = handband_PA_df[(handband_PA_df['ROI'] == rname) & \
+                                        (handband_PA_df['hemisphere'] == hemi) & \
+                                        (handband_PA_df['sj'] == pp)]
+                
+                # if no data in handband, fill with nans
+                if df2plot.empty:
+                    coeff_piecewise = [np.nan]
+                    r2_piecewise = np.nan
+                    aic_piecewise = np.nan
+                    bic_piecewise = np.nan
+                else:
+                    ## fit piecewise function to data
+                    coeff_piecewise, _, r2_piecewise = self.pRFModelObj.fit_piecewise(x_data = df2plot.y_coordinates.values, 
+                                                                        y_data = df2plot.PA.values, 
+                                                                        x0 = df2plot.y_coordinates.values[np.argmax(df2plot.PA.values)], 
+                                                                        y0 = np.max(df2plot.PA.values), 
+                                                                        k1 = 1, k2 = -1,
+                                                                        bounds=([-np.inf, -np.inf, 0, -np.inf], 
+                                                                                [np.inf, y_max, np.inf, 0]))
+                    
+                    # calc AIC and BIC
+                    aic_piecewise = self.pRFModelObj.calc_AIC(df2plot.PA.values, 
+                                                self.pRFModelObj.piecewise_linear(df2plot.y_coordinates.values, 
+                                                                                        *coeff_piecewise), 
+                                                n_params = len(coeff_piecewise))
+                    
+                    bic_piecewise = self.pRFModelObj.calc_BIC(df2plot.PA.values, 
+                                                self.pRFModelObj.piecewise_linear(df2plot.y_coordinates.values, 
+                                                                                        *coeff_piecewise), 
+                                                n_params = len(coeff_piecewise))
+                
+                
+                ## store in dataframe
+                df_summary_models = pd.concat((df_summary_models,
+                                        pd.DataFrame({'sj': [pp], 
+                                                        'ROI': [rname], 
+                                                        'hemisphere': [hemi], 
+                                                        'movement_region': ['visual'],
+                                                        'model': ['piecewise'], 
+                                                        'AIC': [aic_piecewise], 
+                                                        'BIC': [bic_piecewise], 
+                                                        'R2': [r2_piecewise], 
+                                                        'coeffs': [coeff_piecewise]})), 
+                                            ignore_index = True)
+
+                # if no data in handband, fill with nans
+                if df2plot.empty:
+                    coeff_linear = [np.nan]
+                    r2_linear = np.nan
+                    aic_linear = np.nan
+                    bic_linear = np.nan
+                else:
+                    ## fit simple linear regression
+                    coeff_linear, dm_linear, r2_linear = self.pRFModelObj.fit_linear(df2plot.PA.values, 
+                                                                                        df2plot.y_coordinates.values, 
+                                                                                        add_intercept = True)
+                    
+                    # calc AIC and BIC
+                    aic_linear = self.pRFModelObj.calc_AIC(df2plot.PA.values, 
+                                                        self.pRFModelObj.linear_func(dm = dm_linear, 
+                                                                                        betas = coeff_linear), 
+                                                        n_params = len(coeff_linear))
+                    
+                    bic_linear = self.pRFModelObj.calc_BIC(df2plot.PA.values, 
+                                                        self.pRFModelObj.linear_func(dm = dm_linear, 
+                                                                                        betas = coeff_linear), 
+                                                        n_params = len(coeff_linear))
+                    
+                ## store in dataframe
+                df_summary_models = pd.concat((df_summary_models,
+                                        pd.DataFrame({'sj': [pp], 
+                                                        'ROI': [rname], 
+                                                        'hemisphere': [hemi], 
+                                                        'model': ['linear'], 
+                                                        'movement_region': ['visual'],
+                                                        'AIC': [aic_linear], 
+                                                        'BIC': [bic_linear], 
+                                                        'R2': [r2_linear], 
+                                                        'coeffs': [coeff_linear]})), 
+                                            ignore_index = True)
+                
+        return df_summary_models
+    
+    def makefig_handband_PA_over_y(self, handband_PA_df, 
+                                    participant_list = [], hemi = 'LH', roi_ind_list = [8,9,10,11], pa_transform = 'mirror',
+                                    df_models = None, model_names = ['linear', 'piecewise'], model_colors = ['grey', 'k']):
+        
+        """
+        Make figure of COM values vs y coordinates
+        for select handband-ROIs, hemisphere and hand movement
+        across participants
+        Parameters
+        ----------
+        handband_PA_df: DataFrame
+            dataframe with PA values for all handband rois
+        participant_list: list
+            list with participant ID 
+        hemi: str
+            hemisphere to focus on
+        roi_ind_list: list
+            list of handband indices to plot
+        df_models: DF
+            if provided, will also plot model fit on top (ex: linear fit, or piecewise)
+        """
+
+        # make custom colormap
+        if pa_transform == 'mirror':
+            cmap_pa = self.make_colormap(colormap = 'turbo', bins = 256, cmap_name = 'turbo',return_cmap = True)
+            vmin = -np.pi/2
+            vmax = np.pi/2
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+
+        # start fig
+        fig, axs = plt.subplots(len(participant_list), len(roi_ind_list), 
+                                figsize=(int(len(roi_ind_list) * 3.75) ,22), sharex=True, sharey=True)
+
+        # loop over participants
+        for ind, pp in enumerate(participant_list):
+            
+            # plot all columns in row (with values for the participant and handband rois in list)
+            for col_ind, rname in enumerate(roi_names_list):
+                        
+                # subselect relevant part of DF
+                df2plot = handband_PA_df[(handband_PA_df['ROI'] == rname) & \
+                                        (handband_PA_df['hemisphere'] == hemi) & \
+                                        (handband_PA_df['sj'] == pp)]
+
+                sns.scatterplot(data = df2plot, x = 'y_coordinates', y = 'PA',
+                            hue = 'PA', palette = cmap_pa, hue_norm = (vmin,vmax), ax = axs[ind][col_ind])
+                if df2plot.empty == False:
+                    axs[ind][col_ind].get_legend().remove()
+                axs[ind][col_ind].set_ylim([vmin, vmax])
+                
+                # if first row, set title
+                if pp == participant_list[0]:
+                    axs[ind][col_ind].set_title(rname,fontsize=20, pad=10)
+                
+                elif pp == participant_list[-1]: # if last row, format x ticks and label
+                    
+                    axs[ind][col_ind].set_xlabel('y coordinates (a.u.)', fontsize = 18, labelpad=10)
+                    axs[ind][col_ind].tick_params(axis='x',labelsize=12)
+
+                # if model fit dataframe provided, plot prediction on top of scatter 
+                if (df_models is not None) and (df2plot.empty == False):
+                    
+                    # get model values for pp
+                    pp_models_df = df_models[(df_models['ROI'] == rname) & \
+                                            (df_models['hemisphere'] == hemi) & \
+                                            (df_models['sj'] == pp)]
+                    
+                    new_x = np.linspace(df2plot.y_coordinates.values.min(), df2plot.y_coordinates.values.max(), len(df2plot.y_coordinates))
+
+                    # plot lines for each model
+                    for ind_mod, model in enumerate(model_names):
+                        # get coeffs and R2
+                        coeff = pp_models_df[pp_models_df['model'] == model].coeffs.values[0]
+                        r2_model = pp_models_df[pp_models_df['model'] == model].R2.values[0]
+
+                        # get prediction array
+                        if model == 'piecewise':
+                            model_prediction = self.pRFModelObj.piecewise_linear(new_x, *coeff)
+                        elif model == 'linear':
+                            model_prediction = self.pRFModelObj.linear_func(dm = np.vstack((new_x, 
+                                                                                    np.ones(new_x.shape))).T, 
+                                                                            betas = coeff)
+                             
+                        # actually plot
+                        axs[ind][col_ind].plot(new_x, model_prediction, color = model_colors[ind_mod])
+                        axs[ind][col_ind].annotate("R2 {mod} - {r_val:.2f}".format(r_val = r2_model, mod = model), 
+                                                   xy=(0, .7 - ind_mod/3), xycoords='data')
+
+            # format y ticks and label
+            axs[ind][0].set_ylabel('sub-{sj}\n\nPA'.format(sj = pp), fontsize = 18, labelpad=10)
+            axs[ind][0].tick_params(axis='y',labelsize=12)
+            
+            # if first row, put legend on the right side (common for all)
+            # if ind == 0:
+            #     axs[ind][-1].legend(bbox_to_anchor=(1.04, 1), fontsize=15, 
+            #                 handles = [mpatches.Patch(color = cmap_pa(int(256/2*l)), 
+            #                 label = ["{v:.2f}".format(v = vmin), str(0), "{v:.2f}".format(v = vmax)][l]) for l in range(3)])
+
+        fig.subplots_adjust(hspace=0.1,wspace=0.1, right=.82)
+
+        return fig
+    
+    def get_PA_piecewise4plotting(self, handband_PA_df, df_summary_models = None,
+                                    participant_list = [], hemi = 'LH', roi_ind_list = [8,9,10,11], vmin = -np.pi/2, vmax = np.pi/2):
+        
+        """
+        Get piecewise model prediction array, given fitted coefficients,
+        for select handband-ROIs, hemisphere and hand movement
+        across participants
+
+        Parameters
+        ----------
+        handband_PA_df: DataFrame
+            dataframe with PA values for all handband rois
+        participant_list: list
+            list with participant ID 
+        hemi: str
+            hemisphere to focus on
+        roi_ind_list: list
+            list of handband indices to plot
+        df_summary_models: DataFrame
+            dataframe with BIC values for all handband rois
+        """
+
+        # get list of ROIs to plot
+        roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
+
+        # save prediction arrays in DF
+        df_predictions = pd.DataFrame({'sj': [], 'ROI': [], 'hemisphere': [], 
+                                    'prediction_PA': [], 'prediction_y_coordinates': []})
+
+        # save best fitting participant label, to use later
+        bestfit_pp_roi = {}
+
+        for _, rname in enumerate(roi_names_list):
+            
+            # subselect relevant part of DF
+            region_df = handband_PA_df[(handband_PA_df['ROI'] == rname) & \
+                                        (handband_PA_df['hemisphere'] == hemi)]
+
+            # coordinates for ROI
+            prediction_y_coord = np.linspace(region_df.y_coordinates.values.min(), 
+                                            region_df.y_coordinates.values.max(), 300)
+            
+            bestfit_pp_roi[rname] = []
+            
+            # loop over participants
+            for ind, pp in enumerate(participant_list):
+
+                # subselect for participant
+                df2plot = region_df[region_df['sj'] == pp]
+                
+                # get model values for pp
+                pp_models_df = df_summary_models[(df_summary_models['ROI'] == rname) & \
+                                                (df_summary_models['hemisphere'] == hemi) & \
+                                                (df_summary_models['sj'] == pp)]
+
+                ## get prediction array
+                # if any BIC val is nan, means model fit failed (ex: missing data)
+                if np.isnan(pp_models_df.BIC.values).any():
+                    prediction_arr = np.zeros(len(prediction_y_coord)); prediction_arr[:] = np.nan
+                    
+                else:
+                    # if piecewise was a better fit, store for bookeeping
+                    if pp_models_df[pp_models_df['model'] == 'piecewise'].BIC.values < pp_models_df[pp_models_df['model'] == 'linear'].BIC.values:
+                        coeff = pp_models_df[pp_models_df['model'] == 'piecewise'].coeffs.values[0]
+                        prediction_arr = self.pRFModelObj.piecewise_linear(prediction_y_coord, *coeff)
+                        bestfit_pp_roi[rname].append(pp)
+                    else:
+                        # use linear model
+                        coeff = pp_models_df[pp_models_df['model'] == 'linear'].coeffs.values[0]
+                        prediction_arr = self.pRFModelObj.linear_func(dm = np.vstack((prediction_y_coord, 
+                                                                                    np.ones(prediction_y_coord.shape))).T, 
+                                                                    betas = coeff)
+
+                # append in dataframe
+                df_predictions = pd.concat((df_predictions,
+                                        pd.DataFrame({'sj': np.tile(pp, len(prediction_arr)), 
+                                                        'ROI': np.tile(rname, len(prediction_arr)), 
+                                                        'hemisphere': np.tile(hemi, len(prediction_arr)),  
+                                                        'prediction_PA': np.clip(prediction_arr, vmin, vmax), 
+                                                        'prediction_y_coordinates': prediction_y_coord})
+                                        ), ignore_index = True)
+
+        return df_predictions, bestfit_pp_roi
 
     def get_estimates_roi_df(self, participant, estimates_pp, ROIs = None, roi_verts = None, est_key = 'r2', model = 'gauss'):
 
