@@ -654,8 +654,8 @@ class prfModel(Model):
                                         size_grid = fit_params['gauss']['sizes'], 
                                         fixed_grid_baseline = fit_params['gauss']['fixed_grid_baseline'],
                                         grid_bounds = fit_params['gauss']['grid_bounds'],
-                                        y_ecc_lim = self.MRIObj.params['fitting']['prf']['y_ecc_lim'], 
-                                        x_ecc_lim = self.MRIObj.params['fitting']['prf']['x_ecc_lim'])
+                                        y_ecc_lim = None, 
+                                        x_ecc_lim = None)
 
                 # iterative fit
                 print("Gauss model ITERATIVE fit")
