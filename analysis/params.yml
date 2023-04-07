@@ -162,7 +162,7 @@ fitting:
     min_eccen: 0.2
     max_eccen: 15
 
-    y_ecc_lim: 5.5
+    y_ecc_lim: None #5.5
     x_ecc_lim: None
 
     min_size: 0.2
