@@ -497,16 +497,27 @@ class prfModel(Model):
 
         return constraints
 
-    def crossvalidate(self, test_data, model_object = None, estimates = []):
+    def crossvalidate(self, test_data, model_object = None, estimates = [], avg_hrf = False):
 
         """
         Use previously fit parameters to obtain cross-validated Rsq
         on test data
 
+        Parameters
+        ----------
+        test_data: arr
+            Test data for crossvalidation
+        model_object: pRF model object
+            fitter object, from prfpy, to call apropriate return prediction function
+        estimates: arr
+            2D array of iterative estimates (vertex, estimates), in same order of fitter
+        avg_hrf: bool
+            if we want to average hrf estimates across vertices or not (only used if HRF was fit)
+
         """
 
         # if we fit HRF, use median HRF estimates for crossvalidation
-        if self.fit_hrf and estimates.shape[0] > 1: 
+        if (self.fit_hrf) and (avg_hrf) and (estimates.shape[0] > 1): 
             median_hrf_params = np.nanmedian(estimates[:,-3:-1], axis = 0)
             estimates[:,-3:-1] = median_hrf_params
 
@@ -522,7 +533,7 @@ class prfModel(Model):
 
     def fit_data(self, participant, pp_prf_models = None, 
                     fit_type = 'mean_run', chunk_num = None, vertex = None, ROI = None,
-                    model2fit = 'gauss', outdir = None, save_estimates = False,
+                    model2fit = 'gauss', save_estimates = False,
                     xtol = 1e-3, ftol = 1e-4, n_jobs = 16):
 
         """
@@ -558,10 +569,15 @@ class prfModel(Model):
         if fit_type == 'mean_run':         
             # load data of all runs and average
             data2fit = self.load_data4fitting(gii_filenames, average = True)[np.newaxis,...] # [1, vertex, TR]
-
-        elif fit_type == 'loo_run':
+        
+        elif 'loo_run' in fit_type: # if leaving one out
             # get all run lists
             run_loo_list = self.get_run_list(gii_filenames)
+
+            # if want to leave out only one specific run, 
+            # otherwise will iterate through all
+            if len(re.findall('\d{1,2}', fit_type)) > 0:
+                run_loo_list = np.array([int(re.findall('\d{1,2}', fit_type)[0])])
 
             # leave one run out, load other and average
             data2fit = []
@@ -574,16 +590,20 @@ class prfModel(Model):
 
             data2fit = np.vstack(data2fit) # [runs, vertex, TR]
 
+        else: # assumes we are looking at a specific run
+            files2fit = [file for file in gii_filenames if 'run-{r}'.format(r = str(int(re.findall('\d{1,2}', fit_type)[0])).zfill(2)) in file]
+            # load data of run
+            data2fit = self.load_data4fitting(files2fit, average = True)[np.newaxis,...] # [1, vertex, TR]
+
         ## loop over runs
         for r_ind in range(data2fit.shape[0]):
 
             # set output directory
-            if outdir is None:
-                if fit_type == 'loo_run':
-                    outdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, 
-                                                    'run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)))
-                else:
-                    outdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
+            if 'loo_run' in fit_type:
+                outdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 'loo_run', 
+                                                'run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)))
+            else:
+                outdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
 
             os.makedirs(outdir, exist_ok = True)
             print('saving files in %s'%outdir)
@@ -603,7 +623,7 @@ class prfModel(Model):
             chunk2fit = self.chunk_data(data2fit[r_ind], chunk_num = chunk_num, vertex = vertex, ROI = ROI)
 
             # load left out run data, if its the case
-            if fit_type == 'loo_run':
+            if 'loo_run' in fit_type:
                 other_run_data = self.load_data4fitting([file for file in gii_filenames if 'run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)) in file], average = True)
                 loo_chunk2fit = self.chunk_data(other_run_data, chunk_num = chunk_num, vertex = vertex, ROI = ROI)
 
@@ -648,14 +668,14 @@ class prfModel(Model):
                                         xtol = xtol,
                                         ftol = ftol)
                 
-                if fit_type == 'loo_run': 
+                if 'loo_run' in fit_type:
                     # calculate cv-r2
                     print('Calculate CV-rsq for left out run run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)))
-                    CV_r2 = self.crossvalidate(loo_chunk2fit,
+                    cv_r2 = self.crossvalidate(loo_chunk2fit,
                                                 model_object = pp_prf_models['sub-{sj}'.format(sj = participant)]['gauss_model'], 
                                                 estimates = gauss_fitter.iterative_search_params)
                 else:
-                    CV_r2 = None
+                    cv_r2 = None
 
                 # if we want to save estimates
                 if save_estimates and not op.isfile(it_gauss_filename):
@@ -666,7 +686,7 @@ class prfModel(Model):
                     # for it
                     print('saving %s'%it_gauss_filename)
                     self.save_pRF_model_estimates(it_gauss_filename, gauss_fitter.iterative_search_params, 
-                                                    model_type = 'gauss', CV_rsq = CV_r2)
+                                                    model_type = 'gauss', CV_rsq = cv_r2)
 
                 if model2fit != 'gauss':
 
@@ -728,14 +748,14 @@ class prfModel(Model):
                                         xtol = xtol,
                                         ftol = ftol)
                     
-                    if fit_type == 'loo_run': 
+                    if 'loo_run' in fit_type:
                         # calculate cv-r2
                         print('Calculate CV-rsq for left out run run-{r}'.format(r = str(run_loo_list[r_ind]).zfill(2)))
-                        CV_r2 = self.crossvalidate(loo_chunk2fit,
+                        cv_r2 = self.crossvalidate(loo_chunk2fit,
                                                     model_object = pp_prf_models['sub-{sj}'.format(sj = participant)]['{key}_model'.format(key = model2fit)], 
                                                     estimates = fitter.iterative_search_params)
                     else:
-                        CV_r2 = None
+                        cv_r2 = None
 
                     # if we want to save estimates
                     if save_estimates:
@@ -746,7 +766,7 @@ class prfModel(Model):
                         # for it
                         print('saving %s'%it_model_filename)
                         self.save_pRF_model_estimates(it_model_filename, fitter.iterative_search_params, 
-                                                        model_type = model2fit, CV_rsq = CV_r2)
+                                                        model_type = model2fit, CV_rsq = cv_r2)
 
         if not save_estimates:
             # if we're not saving them, assume we are running on the spot

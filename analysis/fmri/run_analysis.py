@@ -181,7 +181,7 @@ if task.lower() == 'prf':
             data_model.fit_data(pp, pp_prf_models = pp_prf_models, 
                                 fit_type = run_type, 
                                 chunk_num = chunk_num, vertex = vertex, ROI = ROI,
-                                model2fit = model2fit, outdir = None, save_estimates = True,
+                                model2fit = model2fit, save_estimates = True,
                                 xtol = 1e-3, ftol = 1e-4, n_jobs = n_jobs)
 
 # motor task analysis
