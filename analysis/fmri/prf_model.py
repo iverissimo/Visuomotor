@@ -940,7 +940,8 @@ class prfModel(Model):
         return out_data
 
 
-    def load_pRF_model_chunks(self, fit_path, fit_model = 'css', fit_hrf = False, basefilename = None, overwrite = False, iterative = True):
+    def load_pRF_model_chunks(self, fit_path, fit_model = 'css', fit_hrf = False, basefilename = None, overwrite = False, iterative = True, 
+                                    crossval = False):
 
         """ 
         combine all chunks 
@@ -1015,6 +1016,11 @@ class prfModel(Model):
                         sb = chunk['sb']
 
                     rsq = chunk['r2']
+                    # if we cross validated
+                    if crossval:
+                        cv_r2 = chunk['cv_r2']
+                    else:
+                        cv_r2 = np.zeros(xx.shape) 
 
                     if fit_hrf and iterative:
                         hrf_derivative = chunk['hrf_derivative']
@@ -1043,6 +1049,12 @@ class prfModel(Model):
                         sb = np.concatenate((sb, chunk['sb']))
 
                     rsq = np.concatenate((rsq, chunk['r2']))
+
+                    # if we cross validated
+                    if crossval:
+                        cv_r2 = np.concatenate((cv_r2, chunk['cv_r2'])) 
+                    else:
+                        cv_r2 = np.concatenate((cv_r2, np.zeros(chunk['r2'].shape))) 
                     
                     if fit_hrf and iterative:
                         hrf_derivative = np.concatenate((hrf_derivative, chunk['hrf_derivative']))
@@ -1065,7 +1077,8 @@ class prfModel(Model):
                         baseline = baseline,
                         hrf_derivative = hrf_derivative,
                         hrf_dispersion = hrf_dispersion,
-                        r2 = rsq)
+                        r2 = rsq,
+                        cv_r2 = cv_r2)
 
             elif 'css' in fit_model:
                 np.savez(filename,
@@ -1077,7 +1090,8 @@ class prfModel(Model):
                         ns = ns,
                         hrf_derivative = hrf_derivative,
                         hrf_dispersion = hrf_dispersion,
-                        r2 = rsq)
+                        r2 = rsq,
+                        cv_r2 = cv_r2)
 
             elif 'dn' in fit_model:
                 np.savez(filename,
@@ -1092,7 +1106,8 @@ class prfModel(Model):
                         sb = sb,
                         hrf_derivative = hrf_derivative,
                         hrf_dispersion = hrf_dispersion,
-                        r2 = rsq)
+                        r2 = rsq,
+                        cv_r2 = cv_r2)
 
             elif 'dog' in fit_model:
                 np.savez(filename,
@@ -1105,7 +1120,8 @@ class prfModel(Model):
                         ss = ss,
                         hrf_derivative = hrf_derivative,
                         hrf_dispersion = hrf_dispersion,
-                        r2 = rsq)
+                        r2 = rsq,
+                        cv_r2 = cv_r2)
             
         else:
             print('file already exists, loading %s'%filename)
@@ -1114,7 +1130,7 @@ class prfModel(Model):
 
 
     def load_pRF_model_estimates(self, participant, fit_type = 'mean_run', 
-                                model_name = None, iterative = True, fit_hrf = False):
+                                model_name = None, iterative = True, fit_hrf = False, avg_est = True):
 
         """
         Helper function to load pRF model estimates
@@ -1149,19 +1165,83 @@ class prfModel(Model):
 
         ## load estimates to make it easier to load later
         if 'loo_' in fit_type:
-            pRFdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 'loo_run', 
-                                                    'run-{r}'.format(r = str(fit_type[-1]).zfill(2)), est_folder)
+            # get list with gii files
+            gii_filenames = self.get_proc_file_list(participant, file_ext = self.proc_file_ext)
+            # get all run lists
+            run_loo_list = self.get_run_list(gii_filenames)
+
+            # if want to leave out only one specific run, 
+            # otherwise will iterate through all
+            if len(re.findall('\d{1,2}', fit_type)) > 0:
+                run_loo_list = np.array([int(re.findall('\d{1,2}', fit_type)[0])])
+
+            # initialize empty dict
+            pp_prf_est_dict = {}
+
+            # iterate over runs
+            for ind, r_num in enumerate(run_loo_list):
+
+                pRFdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), 'loo_run', 
+                                                    'run-{r}'.format(r = str(r_num).zfill(2)), est_folder)
+                
+                ## load estimates for run
+                run_prf_est_dict = self.load_pRF_model_chunks(pRFdir, 
+                                                            fit_model = model_name,
+                                                            basefilename = 'sub-{sj}_task-pRF_'.format(sj = participant),
+                                                            fit_hrf = fit_hrf,
+                                                            iterative = iterative,
+                                                            crossval = True)
+                
+                if ind == 0:
+                    pp_prf_est_dict = dict(run_prf_est_dict)
+                else:
+                    for d_key in run_prf_est_dict.keys():
+                        pp_prf_est_dict[d_key] = np.vstack((pp_prf_est_dict[d_key],run_prf_est_dict[d_key]))
+
+            # if we want to average across runs
+            if avg_est:
+                pp_prf_est_dict = self.average_estimates(pp_prf_est_dict, weight_key = 'cv_r2')
+
         else:
             pRFdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, est_folder)
 
-
-        pp_prf_est_dict = self.load_pRF_model_chunks(pRFdir, 
-                                                    fit_model = model_name,
-                                                    basefilename = 'sub-{sj}_task-pRF_'.format(sj = participant),
-                                                    fit_hrf = fit_hrf,
-                                                    iterative = iterative)
+            pp_prf_est_dict = self.load_pRF_model_chunks(pRFdir, 
+                                                        fit_model = model_name,
+                                                        basefilename = 'sub-{sj}_task-pRF_'.format(sj = participant),
+                                                        fit_hrf = fit_hrf,
+                                                        iterative = iterative,
+                                                        crossval = False)
 
         return pp_prf_est_dict, pp_prf_models
+    
+    def average_estimates(self, prf_est_dict, weight_key = 'cv_r2'):
+
+        """
+        Average estimates across runs, weighted by rsq
+        """
+
+        ## make weights array
+        if weight_key is not None:
+            weight_arr = prf_est_dict[weight_key].copy()
+            weight_arr[weight_arr<=0] = 0 # to remove negative values, that result in unpredictable outcome for weights
+
+        avg_est_dict = {}
+
+        for d_key in prf_est_dict.keys():
+
+            if 'r2' in d_key:
+                r2 = prf_est_dict[d_key].copy()
+                r2[r2<=0] = 0
+                avg_est_dict[d_key] = np.nanmean(r2, axis = 0)
+            else:
+                if weight_key is not None:
+                    avg_est_dict[d_key] = np.stack((np.ma.average(prf_est_dict[d_key][..., ind], 
+                                                    axis=0, 
+                                                    weights=weight_arr[..., ind])) for ind in range(weight_arr.shape[-1]))
+                else:
+                    avg_est_dict[d_key] = np.nanmean(prf_est_dict[d_key], axis = 0)
+
+        return avg_est_dict
 
 
     def  mask_pRF_model_estimates(self, estimates, ROI = None, x_ecc_lim = [-6,6], y_ecc_lim = [-6,6],
