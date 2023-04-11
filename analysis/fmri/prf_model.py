@@ -1130,7 +1130,7 @@ class prfModel(Model):
 
 
     def load_pRF_model_estimates(self, participant, fit_type = 'mean_run', 
-                                model_name = None, iterative = True, fit_hrf = False, avg_est = True):
+                                model_name = None, iterative = True, fit_hrf = False, return_est = 'mean'):
 
         """
         Helper function to load pRF model estimates
@@ -1199,8 +1199,11 @@ class prfModel(Model):
                         pp_prf_est_dict[d_key] = np.vstack((pp_prf_est_dict[d_key],run_prf_est_dict[d_key]))
 
             # if we want to average across runs
-            if avg_est:
-                pp_prf_est_dict = self.average_estimates(pp_prf_est_dict, weight_key = 'cv_r2')
+            if isinstance(return_est, str):
+                if return_est == 'mean':
+                    pp_prf_est_dict = self.average_estimates(pp_prf_est_dict, weight_key = 'cv_r2')
+                elif return_est == 'max':
+                    pp_prf_est_dict = self.max_estimates(pp_prf_est_dict, sort_key = 'cv_r2')
 
         else:
             pRFdir = op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, est_folder)
@@ -1242,6 +1245,24 @@ class prfModel(Model):
                     avg_est_dict[d_key] = np.nanmean(prf_est_dict[d_key], axis = 0)
 
         return avg_est_dict
+    
+    def max_estimates(self, prf_est_dict, sort_key = 'cv_r2'):
+
+        """
+        Get best fitting estimates across runs, 
+        this is, with highest r2/cv-r2
+        """
+
+        # find run indices with highest cv-r2
+        sort_ind = np.argmax(prf_est_dict[sort_key], axis = 0)
+
+        max_est_dict = {}
+
+        for d_key in prf_est_dict.keys():
+
+            max_est_dict[d_key] = prf_est_dict[d_key][sort_ind, np.arange(sort_ind.shape[0])]
+
+        return max_est_dict
 
 
     def  mask_pRF_model_estimates(self, estimates, ROI = None, x_ecc_lim = [-6,6], y_ecc_lim = [-6,6],

@@ -66,6 +66,32 @@ class Viewer:
         # hemisphere labels
         self.hemi_labels = ['LH', 'RH']
 
+    def save_inflated_3Dviews(self, flatmap, viewer_angles_dict = None, base_name = None):
+
+        """
+        Function to make and save inflated 3D views 
+        from different views
+        Note - if running in notebook, will kill kernel
+        """
+
+        if viewer_angles_dict is None:
+            viewer_angles_dict = self.MRIObj.params['plotting']['webview']['3D_view']['angle_params']
+
+        list_angles = list(viewer_angles_dict.items())
+        list_surfaces = [('inflated', self.MRIObj.params['plotting']['webview']['3D_view']['unfold_params']['inflated']) for i in range(len(viewer_angles_dict))]
+
+        # save inflated 3D screenshots 
+        for i in range(len(viewer_angles_dict)):
+            
+            cortex.export.save_3d_views(flatmap, 
+                        base_name = base_name,
+                        list_angles = [list_angles[i]],
+                        list_surfaces = [list_surfaces[i]],        
+                    viewer_params=dict(labels_visible=[],
+                                        overlays_visible=['sulci'], recache=True),
+                    size=(1024 * 4, 768 * 4), trim=True, sleep=30)
+        
+
     def add_data2overlay(self, flatmap = None, name = ''):
 
         """
@@ -479,7 +505,7 @@ class Viewer:
                     # Zoom on just one region
                     self.zoom_to_roi(self.pysub, zoom2ROI, hemi_list[1], ax=ax2)
             
-            return flatmap
+        return flatmap
         
     def zoom_to_roi(self, subject, roi = None, hem = 'left', margin=10.0, ax=None):
 

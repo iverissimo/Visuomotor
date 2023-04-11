@@ -584,10 +584,10 @@ class GLM_Model(somaModel):
         """
 
         if fit_type == 'loo_run':
-                ## load estimates, and get betas and prediction
-                soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, 
-                                                'estimates_loo_run-{ri}.npy'.format(ri = str(run_id).zfill(2))), 
-                                                allow_pickle=True).item()
+            ## load estimates, and get betas and prediction
+            soma_estimates = np.load(op.join(self.outputdir, 'sub-{sj}'.format(sj = participant), fit_type, 
+                                            'estimates_loo_run-{ri}.npy'.format(ri = str(run_id).zfill(2))), 
+                                            allow_pickle=True).item()
 
         elif fit_type == 'mean_run':     
             ## load estimates, and get betas and prediction
