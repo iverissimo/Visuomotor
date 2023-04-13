@@ -1379,10 +1379,10 @@ class GLM_Model(somaModel):
 
         if fit_type == 'loo_run':
             # get all run lists
-            run_loo_list = self.get_run_list(self.get_proc_file_list(pp, file_ext = self.proc_file_ext))
+            run_loo_list = self.get_run_list(self.get_proc_file_list(participant, file_ext = self.proc_file_ext))
 
             ## get average CV-r2 (all used in GLM)
-            _, r2_pp = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
+            _, r2_pp = self.average_betas(participant, fit_type = fit_type, 
                                                         weighted_avg = True, runs2load = run_loo_list)
 
             ## get com_filepath

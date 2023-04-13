@@ -1319,7 +1319,7 @@ class Viewer:
 
         return fig
     
-    def get_ROIband_estimates_df(self, task = 'prf', fit_type = 'loo_run', main_est_name = 'PA', movement_type = 'hand',
+    def get_ROIband_estimates_df(self, task = 'prf', main_est_name = 'PA', movement_type = 'hand',
                            group_estimates = None, participant_list = [], roi_coord = {}, roi_verts = {}, 
                            pa_transform = 'flip', angle_thresh = 3*np.pi/4):
 
@@ -1370,12 +1370,12 @@ class Viewer:
                 if task == 'prf':
                     
                     if main_est_name == 'PA':
-                        est_pp = self.get_polar_angle(xx = group_estimates['sub-{sj}'.format(sj = pp)]['x'], 
+                        est_pp = self.pRFModelObj.get_polar_angle(xx = group_estimates['sub-{sj}'.format(sj = pp)]['x'], 
                                                         yy = group_estimates['sub-{sj}'.format(sj = pp)]['y'], 
                                                         rsq = group_estimates['sub-{sj}'.format(sj = pp)]['r2'], 
                                                         pa_transform = pa_transform, angle_thresh = angle_thresh)
                     elif main_est_name == 'ECC':
-                        est_pp = self.get_eccentricity(xx = group_estimates['sub-{sj}'.format(sj = pp)]['x'], 
+                        est_pp = self.pRFModelObj.get_eccentricity(xx = group_estimates['sub-{sj}'.format(sj = pp)]['x'], 
                                                         yy = group_estimates['sub-{sj}'.format(sj = pp)]['y'], 
                                                         rsq = group_estimates['sub-{sj}'.format(sj = pp)]['r2'])             
                 else:
@@ -1717,6 +1717,36 @@ class Viewer:
         fig.subplots_adjust(hspace = hspace, wspace = wspace, right=.82)
 
         return fig
+    
+    def get_mean_hand_handband_COM_df(self, handband_COM_df):
+
+        """
+        For handband, average COM of both hands and single hand movements,
+        for each participant, hemisphere and ROI
+
+        Parameters
+        ----------
+        handband_COM_df: DataFrame
+            dataframe with COM values for all handband rois
+        """
+
+        df_mean_handband_COM_df = pd.DataFrame({})
+
+        movement_region_dict = {'LH': ['R_hand', 'B_hand'], 'RH': ['L_hand', 'B_hand']}
+
+        # iterate over hemi
+        for hemi in self.hemi_labels:
+
+            df_hemi = handband_COM_df[(handband_COM_df['movement_region'].isin(movement_region_dict[hemi])) & \
+                                      (handband_COM_df['hemisphere'] == hemi)]
+            df_hemi = df_hemi.groupby(['sj', 'ROI', 'hemisphere', 'x_coordinates', 'y_coordinates', 'vertex']).mean().reset_index()
+            df_hemi['movement_region'] = 'combined_hand'
+
+            # append
+            df_mean_handband_COM_df = pd.concat((df_mean_handband_COM_df,
+                                             df_hemi.copy()), ignore_index=True)
+        
+        return df_mean_handband_COM_df
 
 class somaViewer(Viewer):
 
@@ -3022,36 +3052,6 @@ class somaViewer(Viewer):
         else:
             return handband_COM_df
         
-    def get_mean_hand_handband_COM_df(self, handband_COM_df):
-
-        """
-        For handband, average COM of both hands and single hand movements,
-        for each participant, hemisphere and ROI
-
-        Parameters
-        ----------
-        handband_COM_df: DataFrame
-            dataframe with COM values for all handband rois
-        """
-
-        df_mean_handband_COM_df = pd.DataFrame({})
-
-        movement_region_dict = {'LH': ['R_hand', 'B_hand'], 'RH': ['L_hand', 'B_hand']}
-
-        # iterate over hemi
-        for hemi in self.hemi_labels:
-
-            df_hemi = handband_COM_df[(handband_COM_df['movement_region'].isin(movement_region_dict[hemi])) & \
-                                      (handband_COM_df['hemisphere'] == hemi)]
-            df_hemi = df_hemi.groupby(['sj', 'ROI', 'hemisphere', 'x_coordinates', 'y_coordinates', 'vertex']).mean().reset_index()
-            df_hemi['movement_region'] = 'combined_hand'
-
-            # append
-            df_mean_handband_COM_df = pd.concat((df_mean_handband_COM_df,
-                                             df_hemi.copy()), ignore_index=True)
-        
-        return df_mean_handband_COM_df
-
     def plot_COM_maps(self, participant, region = 'face', fit_type = 'mean_run', fixed_effects = True,
                                     n_bins = 256, custom_dm = True, keep_b_evs = False,
                                     all_rois = {'M1': ['4'], 'S1': ['3b'], 'CS': ['3a'], 
@@ -3673,96 +3673,7 @@ class pRFViewer(Viewer):
         rgb_angle[rsq > rsq_thresh] = colors.hsv_to_rgb(hsv_angle[rsq > rsq_thresh])
 
         return rgb_angle
-    
-    def get_polar_angle(self, xx = [], yy = [], rsq = [], pa_transform = 'mirror', angle_thresh = 3*np.pi/4):
-
-        """
-        Helper function that calculates PA and returns array of
-        PA values (which can also be transformed in some way)
-
-        Parameters
-        ----------
-        xx : arr
-            array with x position values
-        yy : arr
-            array with y position values
-        rsq: arr
-            rsq values, to be used as alpha level/threshold
-        pa_transform: str
-            if None, no transform, else will be:
-            mirror - hemipsheres are mirrored, and meridians are over represented
-            norm - normalized PA between 0 and 1
-        """
-
-        ## calculate polar angle
-        polar_angle = np.angle(xx + yy * 1j)
-
-        if pa_transform is not None:
-
-            ## get mid vertex index (diving hemispheres)
-            left_index = cortex.db.get_surfinfo(self.pysub).left.shape[0] 
-
-            polar_angle_out = polar_angle.copy()
-
-            if angle_thresh is not None:
-                # mask out angles within threh interval
-                polar_angle_out[:left_index][np.where((polar_angle[:left_index] > angle_thresh) | (polar_angle[:left_index] < -angle_thresh))[0]] = np.nan
-                polar_angle_out[left_index:][np.where((polar_angle[left_index:] > (-np.pi + angle_thresh)) & (polar_angle[left_index:] < (np.pi - angle_thresh)))[0]] = np.nan
-                polar_angle = polar_angle_out.copy()
-
-            if pa_transform == 'mirror':
-                ## get pa values transformed like in figure 8 of Larsson and Heeger 2006
-                # --> Horizontal meridian = 0
-                # --> upper VF goes from 0 to pi/2
-                # --> lower VF goes from 0 to -pi/2
-
-                # angles from pi/2 to pi (upper left quadrant)
-                ind_ang = np.where((polar_angle > np.pi/2))[0]
-                polar_angle_out[ind_ang] = (polar_angle_out[ind_ang] - np.pi)* -1 # minus pi, then taking absolute (positive) value
-
-                # angles from -pi/2 to -pi (lower left quadrant)
-                ind_ang = np.where((polar_angle < -np.pi/2))[0]
-                polar_angle_out[ind_ang] = (polar_angle_out[ind_ang] + np.pi) * -1 
-
-            if pa_transform == 'flip':
-                # non-uniform representation. we flip vertically to make sure
-                # order of colors same for both hemispheres
-                ind_nan = np.where((~np.isnan(polar_angle_out[left_index:])))[0]
-                polar_angle_out[left_index:][ind_nan] = np.angle(-1*xx + yy * 1j)[left_index:][ind_nan] 
-
-            elif pa_transform == 'norm':
-                polar_angle_out = ((polar_angle + np.pi) / (np.pi * 2.0)) # normalize PA between 0 and 1
-                
-        else:
-            polar_angle_out = polar_angle
-
-        polar_angle_out[np.where((np.isnan(rsq)))[0]] = np.nan
-
-        return polar_angle_out
-
-    def get_eccentricity(self, xx = [], yy = [], rsq = []):
-
-        """
-        Helper function that calculates eccentricity and returns array 
-
-        Parameters
-        ----------
-        xx : arr
-            array with x position values
-        yy : arr
-            array with y position values
-        rsq: arr
-            rsq values, to be used as alpha level/threshold
-        """
-
-        ## calculate eccentricity
-        eccentricity = np.abs(xx + yy * 1j)
-
-        # mask nans
-        eccentricity[np.where((np.isnan(rsq)))[0]] = np.nan
-
-        return eccentricity
-    
+        
     def plot_handband_PA_scatter(self, participant_list, prf_model_name = 'css', fit_type = 'mean_run', 
                                         max_ecc_ext = None, mask_arr = True, pa_transform = 'mirror',
                                         rsq_threshold = .2, iterative = True, pysub = None):
@@ -4227,8 +4138,8 @@ class pRFViewer(Viewer):
             yy = group_estimates['sub-{sj}'.format(sj = pp)]['y']
 
             ## calculate polar angle (normalize PA between 0 and 1)
-            polar_angle_norm = self.get_polar_angle(xx = xx, yy = yy, rsq = r2, 
-                                         pa_transform = 'norm', angle_thresh = None)
+            polar_angle_norm = self.pRFModelObj.get_polar_angle(xx = xx, yy = yy, rsq = r2, 
+                                                            pa_transform = 'norm', angle_thresh = None)
 
             # make path to save sub-specific figures
             sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
@@ -4263,8 +4174,8 @@ class pRFViewer(Viewer):
             #                                 fig_abs_name = fig_name)
             cmap_pa_sns = sns.hls_palette(as_cmap=True, h = 0.01, s=.9, l=.65)
 
-            pa_transformed = self.get_polar_angle(xx = xx, yy = yy, rsq = r2, 
-                                                pa_transform = 'flip', angle_thresh = angle_thresh)
+            pa_transformed = self.pRFModelObj.get_polar_angle(xx = xx, yy = yy, rsq = r2, 
+                                                            pa_transform = 'flip', angle_thresh = angle_thresh)
 
             flatmap = self.plot_flatmap(pa_transformed, 
                                         est_arr2 = alpha_level,

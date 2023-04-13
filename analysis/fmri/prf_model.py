@@ -79,6 +79,8 @@ class prfModel(Model):
         self.bar_width_ratio = self.MRIObj.params['prf']['bar_width_ratio']
         self.hrf_onset = self.MRIObj.params['fitting']['prf']['hrf_onset']
 
+        self.pysub = 'fsaverage' # pycortex subject
+
 
     def make_dm(self, participant, run_length_TR = 90, crop_nr = None, shift = 0, 
                         res_scaling = .1, dm_shape = 'square'):
@@ -1402,6 +1404,96 @@ class prfModel(Model):
             return result, profile.T
         else:
             return result
+        
+
+    def get_polar_angle(self, xx = [], yy = [], rsq = [], pa_transform = 'mirror', angle_thresh = 3*np.pi/4):
+
+        """
+        Helper function that calculates PA and returns array of
+        PA values (which can also be transformed in some way)
+
+        Parameters
+        ----------
+        xx : arr
+            array with x position values
+        yy : arr
+            array with y position values
+        rsq: arr
+            rsq values, to be used as alpha level/threshold
+        pa_transform: str
+            if None, no transform, else will be:
+            mirror - hemipsheres are mirrored, and meridians are over represented
+            norm - normalized PA between 0 and 1
+        """
+
+        ## calculate polar angle
+        polar_angle = np.angle(xx + yy * 1j)
+
+        if pa_transform is not None:
+
+            ## get mid vertex index (diving hemispheres)
+            left_index = cortex.db.get_surfinfo(self.pysub).left.shape[0] 
+
+            polar_angle_out = polar_angle.copy()
+
+            if angle_thresh is not None:
+                # mask out angles within threh interval
+                polar_angle_out[:left_index][np.where((polar_angle[:left_index] > angle_thresh) | (polar_angle[:left_index] < -angle_thresh))[0]] = np.nan
+                polar_angle_out[left_index:][np.where((polar_angle[left_index:] > (-np.pi + angle_thresh)) & (polar_angle[left_index:] < (np.pi - angle_thresh)))[0]] = np.nan
+                polar_angle = polar_angle_out.copy()
+
+            if pa_transform == 'mirror':
+                ## get pa values transformed like in figure 8 of Larsson and Heeger 2006
+                # --> Horizontal meridian = 0
+                # --> upper VF goes from 0 to pi/2
+                # --> lower VF goes from 0 to -pi/2
+
+                # angles from pi/2 to pi (upper left quadrant)
+                ind_ang = np.where((polar_angle > np.pi/2))[0]
+                polar_angle_out[ind_ang] = (polar_angle_out[ind_ang] - np.pi)* -1 # minus pi, then taking absolute (positive) value
+
+                # angles from -pi/2 to -pi (lower left quadrant)
+                ind_ang = np.where((polar_angle < -np.pi/2))[0]
+                polar_angle_out[ind_ang] = (polar_angle_out[ind_ang] + np.pi) * -1 
+
+            if pa_transform == 'flip':
+                # non-uniform representation. we flip vertically to make sure
+                # order of colors same for both hemispheres
+                ind_nan = np.where((~np.isnan(polar_angle_out[left_index:])))[0]
+                polar_angle_out[left_index:][ind_nan] = np.angle(-1*xx + yy * 1j)[left_index:][ind_nan] 
+
+            elif pa_transform == 'norm':
+                polar_angle_out = ((polar_angle + np.pi) / (np.pi * 2.0)) # normalize PA between 0 and 1
+                
+        else:
+            polar_angle_out = polar_angle
+
+        polar_angle_out[np.where((np.isnan(rsq)))[0]] = np.nan
+
+        return polar_angle_out
+
+    def get_eccentricity(self, xx = [], yy = [], rsq = []):
+
+        """
+        Helper function that calculates eccentricity and returns array 
+
+        Parameters
+        ----------
+        xx : arr
+            array with x position values
+        yy : arr
+            array with y position values
+        rsq: arr
+            rsq values, to be used as alpha level/threshold
+        """
+
+        ## calculate eccentricity
+        eccentricity = np.abs(xx + yy * 1j)
+
+        # mask nans
+        eccentricity[np.where((np.isnan(rsq)))[0]] = np.nan
+
+        return eccentricity
 
     
 
