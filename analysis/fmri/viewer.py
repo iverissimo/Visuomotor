@@ -3395,14 +3395,18 @@ class pRFViewer(Viewer):
                 #boundaries = np.linspace(0,1,len(cmap_name))
                 #norm = colors.BoundaryNorm(boundaries, colormap.N, clip=True)
                 norm = colors.Normalize(-angle_thresh, angle_thresh) 
+        
+        else:
+            cmap = cmap_name
+            norm = colors.Normalize(-angle_thresh, angle_thresh) # normalize between the point where we defined our color threshold
 
         # non-uniform colorwheel
         if angle_thresh != np.pi:
             
             ## for LH (RVF)
             circle_pa_left = circle_pa.copy()
-            # between thresh angle make it red
-            circle_pa_left[(circle_pa_left < -angle_thresh) | (circle_pa_left > angle_thresh)] = angle_thresh
+            ## between thresh angle make it red
+            #circle_pa_left[(circle_pa_left < -angle_thresh) | (circle_pa_left > angle_thresh)] = angle_thresh
 
             plt.imshow(circle_pa_left, cmap=cmap, norm=norm,origin='lower') # origin lower because imshow flips it vertically, now in right order for VF
             plt.axis('off')
@@ -3412,8 +3416,8 @@ class pRFViewer(Viewer):
             ## for RH (LVF)
             circle_pa_right = circle_pa.copy()
             circle_pa_right = np.fliplr(circle_pa_right)
-            # between thresh angle make it red
-            circle_pa_right[(circle_pa_right < -angle_thresh) | (circle_pa_right > angle_thresh)] = angle_thresh
+            ## between thresh angle make it red
+            #circle_pa_right[(circle_pa_right < -angle_thresh) | (circle_pa_right > angle_thresh)] = angle_thresh
 
             plt.imshow(circle_pa_right, cmap=cmap, norm=norm,origin='lower')
             plt.axis('off')
@@ -3543,7 +3547,8 @@ class pRFViewer(Viewer):
             if pa_transform == 'flip':
                 # non-uniform representation. we flip vertically to make sure
                 # order of colors same for both hemispheres
-                polar_angle_out[left_index:] = np.angle(-1*xx + yy * 1j)[left_index:] 
+                ind_nan = np.where((~np.isnan(polar_angle_out[left_index:])))[0]
+                polar_angle_out[left_index:][ind_nan] = np.angle(-1*xx + yy * 1j)[left_index:][ind_nan] 
 
             elif pa_transform == 'norm':
                 polar_angle_out = ((polar_angle + np.pi) / (np.pi * 2.0)) # normalize PA between 0 and 1
@@ -3897,7 +3902,8 @@ class pRFViewer(Viewer):
     
     def makefig_handband_PA_over_y(self, handband_PA_df, 
                                     participant_list = [], hemi = 'LH', roi_ind_list = [8,9,10,11], pa_transform = 'mirror',
-                                    df_models = None, model_names = ['linear', 'piecewise'], model_colors = ['grey', 'k']):
+                                    df_models = None, model_names = ['linear', 'piecewise'], model_colors = ['grey', 'k'],
+                                    cmap_pa = None, vmin = -np.pi/2, vmax = np.pi/2):
         
         """
         Make figure of COM values vs y coordinates
@@ -3918,10 +3924,8 @@ class pRFViewer(Viewer):
         """
 
         # make custom colormap
-        if pa_transform == 'mirror':
+        if cmap_pa is None:
             cmap_pa = self.make_colormap(colormap = 'turbo', bins = 256, cmap_name = 'turbo',return_cmap = True)
-            vmin = -np.pi/2
-            vmax = np.pi/2
 
         # get list of ROIs to plot
         roi_names_list = ['handband_{i}'.format(i = val) for val in roi_ind_list]
@@ -4409,14 +4413,10 @@ class pRFViewer(Viewer):
             xx = group_estimates['sub-{sj}'.format(sj = pp)]['x']
             yy = group_estimates['sub-{sj}'.format(sj = pp)]['y']
 
-            ## calculate polar angle 
-            complex_location = xx + yy * 1j 
+            ## calculate polar angle (normalize PA between 0 and 1)
+            polar_angle_norm = self.get_polar_angle(xx = xx, yy = yy, rsq = r2, 
+                                         pa_transform = 'norm', angle_thresh = None)
 
-            polar_angle = np.angle(complex_location)
-            polar_angle_norm = ((polar_angle + np.pi) / (np.pi * 2.0)) # normalize PA between 0 and 1
-            polar_angle_norm[np.where((np.isnan(r2)))[0]] = np.nan
-
-            
             # make path to save sub-specific figures
             sub_figures_pth = op.join(figures_pth, 'sub-{sj}'.format(sj = pp))
             os.makedirs(sub_figures_pth, exist_ok=True)
@@ -4432,12 +4432,13 @@ class pRFViewer(Viewer):
                                         cmap = PA_cmap, 
                                         vmin1 = 0, vmax1 = 1, 
                                         vmin2 = 0, vmax2 = 1, 
+                                        with_colorbar = False,
                                         fig_abs_name = fig_name)
             
-            # also plot non-uniform color wheel
-            rgb_pa = self.get_NONuniform_polar_angle(xx = xx, yy = yy, rsq = r2, 
-                                                angle_thresh = angle_thresh, 
-                                                rsq_thresh = 0)
+            # # also plot non-uniform color wheel
+            # rgb_pa = self.get_NONuniform_polar_angle(xx = xx, yy = yy, rsq = r2, 
+            #                                     angle_thresh = angle_thresh, 
+            #                                     rsq_thresh = 0)
             ## make ones mask,
             #ones_mask = np.ones(r2.shape)
             #ones_mask[np.where((np.isnan(r2)))[0]] = np.nan
@@ -4445,8 +4446,20 @@ class pRFViewer(Viewer):
             fig_name = fig_name.replace('_PA', '_PAnonUNI')
 
             #### plot flatmap ###
-            flatmap = self.plot_RGBflatmap(rgb_arr = rgb_pa, alpha_arr = alpha_level, #ones_mask,
-                                            fig_abs_name = fig_name)
+            # flatmap = self.plot_RGBflatmap(rgb_arr = rgb_pa, alpha_arr = alpha_level, #ones_mask,
+            #                                 fig_abs_name = fig_name)
+            cmap_pa_sns = sns.hls_palette(as_cmap=True, h = 0.01, s=.9, l=.65)
+
+            pa_transformed = self.get_polar_angle(xx = xx, yy = yy, rsq = r2, 
+                                                pa_transform = 'flip', angle_thresh = angle_thresh)
+
+            flatmap = self.plot_flatmap(pa_transformed, 
+                                        est_arr2 = alpha_level,
+                                        cmap = cmap_pa_sns, 
+                                        vmin1 = -np.pi, vmax1 = np.pi, 
+                                        vmin2 = 0, vmax2 = 1, fig_abs_name = fig_name,
+                                        with_colorbar = False,
+                                        figsize=(15,5), dpi=300)
             
             # plot x and y separately, for sanity check
             # XX
@@ -4472,8 +4485,8 @@ class pRFViewer(Viewer):
             ## plot the colorwheels as figs
             
             # non uniform colorwheel
-            self.plot_pa_colorwheel(resolution=800, angle_thresh = angle_thresh, cmap_name = 'hsv', 
-                                            continuous = True, fig_name = op.join(sub_figures_pth, 'hsv'))
+            self.plot_pa_colorwheel(resolution=800, angle_thresh = angle_thresh, cmap_name = cmap_pa_sns, 
+                                            continuous = True, fig_name = op.join(sub_figures_pth, 'hsv_seaborn'))
 
             # uniform colorwheel, continuous
             self.plot_pa_colorwheel(resolution=800, angle_thresh = np.pi, 

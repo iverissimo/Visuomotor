@@ -172,6 +172,11 @@ class Model:
             1D array of uncertainty in ydata, should contain values of standard deviations of errors in ydata
         """ 
 
+        # in case starting point outside of bounds, force it to be in bounds
+        if len(bounds[1]) > 1:
+            if y0 > bounds[1][1]:
+                y0 = bounds[1][1]
+
         popt_piecewise, pcov = scipy.optimize.curve_fit(self.piecewise_linear, 
                                                 x_data, y_data, 
                                                 p0 = [x0, y0, k1, k2],
