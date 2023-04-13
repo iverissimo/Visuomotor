@@ -1371,6 +1371,37 @@ class GLM_Model(somaModel):
             np.save(stats_filename, {'Fstat': F_stat, 'p_val': p_values_F, 'Fstat_FDR': F_stat_fdr})
 
 
+    def load_COM(self, participant, fit_type = 'loo_run', region_name = 'upper_limb_L'):
+
+        """
+        Quick function to load COM values, need to improve later
+        """
+
+        if fit_type == 'loo_run':
+            # get all run lists
+            run_loo_list = self.get_run_list(self.get_proc_file_list(pp, file_ext = self.proc_file_ext))
+
+            ## get average CV-r2 (all used in GLM)
+            _, r2_pp = self.somaModelObj.average_betas(participant, fit_type = fit_type, 
+                                                        weighted_avg = True, runs2load = run_loo_list)
+
+            ## get com_filepath
+            com_dir = op.join(self.COM_outputdir, 'sub-{sj}'.format(sj = participant), 'fixed_effects', fit_type)
+
+        else:
+            # load GLM estimates, and get r2
+            r2_pp = self.load_GLMestimates(participant, fit_type = fit_type, run_id = None)['r2']
+
+            ## get com_filepath
+            com_dir = op.join(self.COM_outputdir, 'sub-{sj}'.format(sj = participant), fit_type)
+
+        COM_region = np.load(op.join(com_dir, 'COM_reg-{r}.npy'.format(r=region_name)), 
+                                allow_pickle = True)
+        
+        return COM_region, r2_pp
+
+
+
 class somaRF_Model(somaModel):
 
     def __init__(self, MRIObj, outputdir = None):
