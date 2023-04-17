@@ -1639,6 +1639,9 @@ class Viewer:
                                                 bins = 256, cmap_name = 'custom_hand', return_cmap = True) 
             elif movement_region == 'visual':
                 cmap_4plot = self.make_colormap(colormap = 'turbo', bins = 256, cmap_name = 'turbo', return_cmap = True)
+            elif movement_region == 'face':
+                cmap_4plot = self.make_colormap(colormap = self.somaModelObj.MRIObj.params['plotting']['soma']['colormaps']['face'],
+                                                bins = 256, cmap_name = 'custom_face', return_cmap = True) 
 
         # start fig
         fig, axs = plt.subplots(len(participant_list), len(roi_names_list), 
