@@ -157,8 +157,17 @@ plotting:
       unfold_params: {'inflated': {'surface.{subject}.unfold': 0.5,},
                       'flatmap': {'surface.{subject}.unfold': 1,},
                       'fiducial': {'surface.{subject}.unfold': 0,},
-                      'inflated_half': {'surface.{subject}.unfold': 0.5,},
+                      'inflated_half': {'surface.{subject}.unfold': 0.25,},
+                      'inflated_less': {'surface.{subject}.unfold': 0.35,},
                       }
+
+      zoomed: 
+        sPCS: {'sPCS_hands_left': {'camera.azimuth': 82, 'camera.altitude': 47, 'camera.radius': 230, 'surface.{subject}.specularity': 0, 'surface.{subject}.pivot': 0,'surface.{subject}.right': False,},
+              'sPCS_hands_right': {'camera.azimuth': 268, 'camera.altitude': 47, 'camera.radius': 230, 'surface.{subject}.specularity': 0, 'surface.{subject}.pivot': 0,'surface.{subject}.left': False,}
+                    }
+        iPCS: {'iPCS_hands_left': {'camera.azimuth': 80, 'camera.altitude': 95, 'camera.radius': 230, 'surface.{subject}.specularity': 0, 'surface.{subject}.pivot': 0,'surface.{subject}.right': False,},
+              'iPCS_hands_right': {'camera.azimuth': 278, 'camera.altitude': 95, 'camera.radius': 230, 'surface.{subject}.specularity': 0, 'surface.{subject}.pivot': 0,'surface.{subject}.left': False,}
+                    }
         
 
 fitting:

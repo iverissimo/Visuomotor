@@ -66,7 +66,8 @@ class Viewer:
         # hemisphere labels
         self.hemi_labels = ['LH', 'RH']
 
-    def save_inflated_3Dviews(self, flatmap, viewer_angles_dict = None, base_name = None):
+    def save_inflated_3Dviews(self, flatmap, viewer_angles_dict = None, base_name = None, unfold_type = 'inflated',
+                                    overlays_visible=['sulci']):
 
         """
         Function to make and save inflated 3D views 
@@ -78,7 +79,7 @@ class Viewer:
             viewer_angles_dict = self.MRIObj.params['plotting']['webview']['3D_view']['angle_params']
 
         list_angles = list(viewer_angles_dict.items())
-        list_surfaces = [('inflated', self.MRIObj.params['plotting']['webview']['3D_view']['unfold_params']['inflated']) for i in range(len(viewer_angles_dict))]
+        list_surfaces = [(unfold_type, self.MRIObj.params['plotting']['webview']['3D_view']['unfold_params'][unfold_type]) for i in range(len(viewer_angles_dict))]
 
         # save inflated 3D screenshots 
         for i in range(len(viewer_angles_dict)):
@@ -88,7 +89,7 @@ class Viewer:
                         list_angles = [list_angles[i]],
                         list_surfaces = [list_surfaces[i]],        
                     viewer_params=dict(labels_visible=[],
-                                        overlays_visible=['sulci'], recache=True),
+                                        overlays_visible=overlays_visible, recache=True),
                     size=(1024 * 4, 768 * 4), trim=True, sleep=30)
         
 
@@ -410,7 +411,7 @@ class Viewer:
                             cmap='hot', fig_abs_name = None, recache = False, with_colorbar = True,
                             with_curvature = True, with_sulci = True, with_labels=False,
                             curvature_brightness = 0.4, curvature_contrast = 0.1, with_rois = True,
-                            zoom2ROI = None, hemi_list = ['left', 'right'], figsize=(15,5), dpi=300):
+                            zoom2ROI = None, hemi_list = ['left', 'right'], figsize=(15,5), dpi=300, margin = 10):
 
         """
         plot flatmap of data (1D)
@@ -472,7 +473,27 @@ class Viewer:
                                                 data2 = surface_arr2, 
                                                 vmin2 = vmin2, vmax2 = vmax2, 
                                                 subject = self.pysub, data2D = data2D)
+
+        if len(hemi_list)>1 and zoom2ROI is not None:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize = figsize, dpi = dpi)
+        else:
+            fig, ax1 =  plt.subplots(1, figsize = figsize, dpi = dpi)
+
+        cortex.quickshow(flatmap, fig = ax1, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
+                                with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
+                                curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
         
+        if zoom2ROI is not None:
+            # Zoom on just one hemisphere
+            self.zoom_to_roi(self.pysub, roi = zoom2ROI, hem = hemi_list[0], ax=ax1, margin = margin)
+
+            if len(hemi_list)>1:
+                cortex.quickshow(flatmap, fig = ax2, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
+                                with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
+                                curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
+                # Zoom on just one region
+                self.zoom_to_roi(self.pysub, roi = zoom2ROI, hem = hemi_list[1], ax=ax2, margin = margin)
+
         # if we provide absolute name for figure, then save there
         if fig_abs_name is not None:
 
@@ -481,29 +502,12 @@ class Viewer:
             os.makedirs(fig_pth, exist_ok = True)
 
             print('saving %s' %fig_abs_name)
-            _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
-                                                with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
-                                                curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
-        else:
-            if len(hemi_list)>1 and zoom2ROI is not None:
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize = figsize, dpi = dpi)
-            else:
-                fig, ax1 =  plt.subplots(1, figsize = figsize, dpi = dpi)
-
-            cortex.quickshow(flatmap, fig = ax1, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
-                                    with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
-                                    curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
-            
             if zoom2ROI is not None:
-                # Zoom on just one hemisphere
-                self.zoom_to_roi(self.pysub, zoom2ROI, hemi_list[0], ax=ax1)
-
-                if len(hemi_list)>1:
-                    cortex.quickshow(flatmap, fig = ax2, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
-                                    with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
-                                    curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
-                    # Zoom on just one region
-                    self.zoom_to_roi(self.pysub, zoom2ROI, hemi_list[1], ax=ax2)
+                fig.savefig(fig_abs_name, dpi = dpi)
+            else:
+                _ = cortex.quickflat.make_png(fig_abs_name, flatmap, recache = recache, with_colorbar = with_colorbar, with_rois = with_rois,
+                                                    with_curvature = with_curvature, with_sulci = with_sulci, with_labels = with_labels,
+                                                    curvature_brightness = curvature_brightness, curvature_contrast = curvature_contrast)
             
         return flatmap
         
@@ -693,7 +697,7 @@ class Viewer:
             # get colormap
             cmap = cm.get_cmap(colormap)
 
-        else: # is list of strings
+        elif isinstance(colormap, list) or isinstance(colormap, np.ndarray): # is list of strings
             cvals  = np.arange(len(colormap))
             norm = plt.Normalize(min(cvals),max(cvals))
             tuples = list(zip(map(norm,cvals), colormap))
@@ -702,6 +706,9 @@ class Viewer:
             if discrete == True: # if we want a discrete colormap from list
                 cmap = colors.ListedColormap(colormap)
                 bins = int(len(colormap))
+        
+        else: # assumes it is colormap object
+            cmap = colormap #(range(256)) # note, to get full colormap we cannot make it discrete
 
         # convert into array
         cmap_array = cmap(range(bins))
@@ -1750,6 +1757,60 @@ class Viewer:
                                              df_hemi.copy()), ignore_index=True)
         
         return df_mean_handband_COM_df
+    
+    def get_handband_COM_correlation_df(self, handband_COM_df, corr_method = 'spearman', alpha = .05,
+                                            hemi = 'LH', movement_region_dict = {'LH': ['R_hand', 'B_hand'], 'RH': ['L_hand', 'B_hand']}):
+        
+        """
+        Correlate single hand with both hand movement COM values
+        done per hemisphere
+
+        Parameters
+        ----------
+        handband_COM_df: DataFrame
+            dataframe with COM values for all handband rois
+        hemi: str
+            hemisphere of interest
+        movement_region_dict: dict
+            type of movements to correlate per hemisphere
+        corr_method: str
+            type of correlation (spearman, pearson etc)
+        alpha: float
+            alpha level for confidence interval
+        """
+
+        # subselect for hemisphere
+        df_hemi = handband_COM_df[(handband_COM_df['movement_region'].isin(movement_region_dict[hemi])) & \
+                                    (handband_COM_df['hemisphere'] == hemi)]
+
+        ## correlate single and both hand movement COM values
+        # for this hemisphere
+        corr_df = pd.pivot_table(df_hemi, values = 'COM', 
+                            index = ['sj', 'ROI', 'hemisphere', 'x_coordinates', 'y_coordinates', 'vertex'],
+                            columns = ['movement_region']).groupby(['sj', 'ROI']).corr(method = corr_method).reset_index()
+
+        # remove irrelevant column
+        corr_df = corr_df[(corr_df['movement_region'] == movement_region_dict[hemi][-1])].drop(columns=[movement_region_dict[hemi][-1]])
+        # and rename correlation column
+        corr_df.rename(columns={movement_region_dict[hemi][0]:'rho'}, inplace=True)
+
+        # add number of points used for correlation (to calculate CI later)
+        corr_df['n_obs'] = pd.pivot_table(df_hemi, values = 'COM', 
+                            index = ['sj', 'ROI', 'hemisphere', 'x_coordinates', 'y_coordinates', 'vertex'],
+                            columns = ['movement_region']).groupby(['sj', 'ROI']).size().values
+        
+        ## z fisher transform
+        z1, se, lo, hi = self.somaModelObj.corr2zFischer(corr_df.rho.values, 
+                                                        alpha = alpha,
+                                                        n_obs = corr_df.n_obs.values)
+
+        ## add to dataframe
+        corr_df['zFisher'] = z1
+        corr_df['seFisher'] = se
+        corr_df['ci_min'] = lo
+        corr_df['ci_max'] = hi
+
+        return corr_df
 
 class somaViewer(Viewer):
 
@@ -1997,60 +2058,6 @@ class somaViewer(Viewer):
         fig.subplots_adjust(hspace=0.1,wspace=0.1, right=.82)
 
         return fig
-
-    def get_handband_COM_correlation_df(self, handband_COM_df, corr_method = 'spearman', alpha = .05,
-                                            hemi = 'LH', movement_region_dict = {'LH': ['R_hand', 'B_hand'], 'RH': ['L_hand', 'B_hand']}):
-        
-        """
-        Correlate single hand with both hand movement COM values
-        done per hemisphere
-
-        Parameters
-        ----------
-        handband_COM_df: DataFrame
-            dataframe with COM values for all handband rois
-        hemi: str
-            hemisphere of interest
-        movement_region_dict: dict
-            type of movements to correlate per hemisphere
-        corr_method: str
-            type of correlation (spearman, pearson etc)
-        alpha: float
-            alpha level for confidence interval
-        """
-
-        # subselect for hemisphere
-        df_hemi = handband_COM_df[(handband_COM_df['movement_region'].isin(movement_region_dict[hemi])) & \
-                                    (handband_COM_df['hemisphere'] == hemi)]
-
-        ## correlate single and both hand movement COM values
-        # for this hemisphere
-        corr_df = pd.pivot_table(df_hemi, values = 'COM', 
-                            index = ['sj', 'ROI', 'hemisphere', 'x_coordinates', 'y_coordinates', 'vertex'],
-                            columns = ['movement_region']).groupby(['sj', 'ROI']).corr(method = corr_method).reset_index()
-
-        # remove irrelevant column
-        corr_df = corr_df[(corr_df['movement_region'] == movement_region_dict[hemi][-1])].drop(columns=[movement_region_dict[hemi][-1]])
-        # and rename correlation column
-        corr_df.rename(columns={movement_region_dict[hemi][0]:'rho'}, inplace=True)
-
-        # add number of points used for correlation (to calculate CI later)
-        corr_df['n_obs'] = pd.pivot_table(df_hemi, values = 'COM', 
-                            index = ['sj', 'ROI', 'hemisphere', 'x_coordinates', 'y_coordinates', 'vertex'],
-                            columns = ['movement_region']).groupby(['sj', 'ROI']).size().values
-        
-        ## z fisher transform
-        z1, se, lo, hi = self.somaModelObj.corr2zFischer(corr_df.rho.values, 
-                                                        alpha = alpha,
-                                                        n_obs = corr_df.n_obs.values)
-
-        ## add to dataframe
-        corr_df['zFisher'] = z1
-        corr_df['seFisher'] = se
-        corr_df['ci_min'] = lo
-        corr_df['ci_max'] = hi
-
-        return corr_df
     
     def plot_handband_COM_correlation(self, corr_df, roi_ind_list = [8,9,10,11]):
 
