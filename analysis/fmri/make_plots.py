@@ -128,6 +128,41 @@ if task in ['pRF', 'prf']:
         plotter.plot_prf_results(participant_list = Visuomotor_data.sj_num, 
                                 fit_type = run_type, prf_model_name = model_name['prf'],
                                 mask_arr = True, rsq_threshold = .2, iterative = True)
+        
+    elif py_cmd == 'ecc_size':
+
+        plotter.plot_ecc_size(participant_list = Visuomotor_data.sj_num, 
+                                fit_type = run_type, model_name = model_name['prf'],
+                                mask_arr = True, rsq_threshold = .2, 
+                                max_ecc_ext = 6, max_size_ext = 15.5, n_bins_dist = 8)
+    
+    elif py_cmd == 'ns':
+
+        plotter.plot_exponent(participant_list = Visuomotor_data.sj_num, 
+                                fit_type = run_type, model_name = model_name['prf'],
+                                mask_arr = True, rsq_threshold = .2, 
+                                max_ecc_ext = 6)
+    
+    elif py_cmd == 'coverage':
+
+        plotter.plot_VFcoverage(participant_list = Visuomotor_data.sj_num, 
+                                fit_type = run_type, model_name = model_name['prf'],
+                                mask_arr = True, rsq_threshold = .2, 
+                                max_ecc_ext = 6)
+        
+    elif py_cmd == 'inflated':
+
+        plotter.plot_inflated_maps(participant_list = Visuomotor_data.sj_num, 
+                                fit_type = run_type, model_name = model_name['prf'],
+                                mask_arr = True)
+        
+    elif py_cmd == 'ecc_distribution':
+
+        plotter.plot_ecc_distribution(participant_list = Visuomotor_data.sj_num, 
+                                fit_type = run_type, model_name = model_name['prf'],
+                                mask_arr = True)
+        
+    
 
 elif task == 'soma':
 
