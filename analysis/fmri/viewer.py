@@ -4593,6 +4593,8 @@ class pRFViewer(Viewer):
         Plot ecc and size - flatmaps and linear relationship - 
         for all participants in list
         """
+        sns.set_theme(style="white", rc={"axes.facecolor": (0, 0, 0, 0), 'legend.frameon': True,
+                                'font.family': 'sans-serif', 'font.sans-serif': 'Helvetica'})
 
         if len(group_estimates) == 0:
             group_estimates = self.get_prf_results(participant_list = participant_list, fit_type = fit_type, prf_model_name = model_name, 
@@ -5220,7 +5222,7 @@ class pRFViewer(Viewer):
             
             fig_name = op.join(figures_pth, op.split(fig_name)[-1].replace('sub-{sj}'.format(sj = pp), 'sub-GROUP'))
 
-            fig2.savefig(fig_name, dpi=100,bbox_inches = 'tight')
+            fig2.savefig(fig_name.replace('.png', '.svg'), dpi=100,bbox_inches = 'tight')
 
             ### PLOT 2 ###
             fig, ax1 = plt.subplots(1,1, figsize=(8,12), dpi=100, facecolor='w', edgecolor='k')
@@ -5267,7 +5269,7 @@ class pRFViewer(Viewer):
             plt.xlabel('Contralateral vertices (%)',fontsize = 20,labelpad=18)
             plt.xlim(0,100)#1)
 
-            fig.savefig(fig_name.replace('KDE', 'Contralateral_vertices'), dpi=100,bbox_inches = 'tight')
+            fig.savefig(fig_name.replace('.png', '.svg').replace('KDE', 'Contralateral_vertices'), dpi=100,bbox_inches = 'tight')
 
 
     def open_click_viewer(self, participant, fit_type = 'mean_run', prf_model_name = 'gauss', 
